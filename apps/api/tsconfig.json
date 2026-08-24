@@ -37,6 +37,6 @@
   // Tests and the Prisma seed are included so `tsc --noEmit` typechecks them —
   // a type error in a test should fail the build. `nest build` uses
   // tsconfig.build.json instead, which excludes them from the emitted output.
-  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts", "prisma.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

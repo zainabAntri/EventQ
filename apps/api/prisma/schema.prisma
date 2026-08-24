@@ -1,0 +1,611 @@
+// EventQ database schema.
+//
+// Enum values here MIRROR packages/contracts/src/enums.ts, which is the source
+// of truth. A drift test in src/shared/prisma asserts the two stay identical,
+// so a value added in one place and forgotten in the other fails CI rather than
+// surfacing as a runtime error during a live event.
+//
+// Conventions:
+//   - UUID v7 primary keys: time-sortable, so they cluster well in the index
+//     instead of scattering writes across the B-tree like UUID v4.
+//   - Soft delete via deletedAt only where a user can remove their own content
+//     and moderators still need the audit trail.
+//   - Every tenant-owned row reaches Organization through a chain of required
+//     FKs, which is what makes org-scoping enforceable at the data layer.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+// Prisma 7 moved the connection URL out of the schema. It now lives in
+// prisma.config.ts for CLI/Migrate, and the runtime client receives a driver
+// adapter instead. See src/shared/prisma/prisma.service.ts.
+datasource db {
+  provider   = "postgresql"
+  // pgcrypto: gen_random_uuid fallback
+  // pg_trgm:  trigram similarity for FREE near-duplicate detection (no AI cost)
+  // vector:   pgvector, reserved for future semantic similarity
+  extensions = [pgcrypto, pg_trgm, vector]
+}
+
+// ---------------------------------------------------------------------------
+// Enums (mirror @eventq/contracts)
+// ---------------------------------------------------------------------------
+
+enum EventType {
+  NETWORKING
+  CONFERENCE
+  SEMINAR
+  WORKSHOP
+  UNIVERSITY
+  WEBINAR
+  CORPORATE
+  PANEL
+}
+
+enum EventStatus {
+  DRAFT
+  SCHEDULED
+  LIVE
+  PAUSED
+  ENDED
+  ARCHIVED
+}
+
+enum QuestionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SPAM
+  ANSWERED
+  ARCHIVED
+}
+
+enum ModerationMode {
+  PRE
+  POST
+}
+
+enum AttendeeIdentityMode {
+  ANONYMOUS
+  OPTIONAL
+  REQUIRED
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MODERATOR
+  SPEAKER
+}
+
+enum ActorType {
+  USER
+  ATTENDEE
+  SYSTEM
+  AI
+}
+
+enum EnrichmentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+// ---------------------------------------------------------------------------
+// Identity & Access
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  name      String   @db.VarChar(200)
+  slug      String   @unique @db.VarChar(100)
+  /// Commercial plan placeholder. No billing integration is wired yet.
+  plan      String   @default("free") @db.VarChar(50)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+
+  memberships Membership[]
+  invitations Invitation[]
+  events      Event[]
+  auditLogs   AuditLog[]
+
+  @@index([deletedAt])
+  @@map("organizations")
+}
+
+model User {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  email           String    @unique @db.VarChar(320)
+  /// argon2id. Never bcrypt.
+  passwordHash    String    @db.Text
+  name            String    @db.VarChar(200)
+  emailVerifiedAt DateTime?
+
+  /// MFA columns exist from day one. Adding them later would mean a migration
+  /// on a table that is read on every authenticated request.
+  mfaEnabled      Boolean   @default(false)
+  totpSecretEnc   String?   @db.Text
+
+  /// Progressive lockout state for credential stuffing defence.
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  memberships       Membership[]
+  authSessions      AuthSession[]
+  invitationsSent   Invitation[]       @relation("InvitationInvitedBy")
+  answers           Answer[]
+  moderationActions ModerationAction[]
+
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Membership {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  userId    String   @db.Uuid
+  orgId     String   @db.Uuid
+  role      OrgRole
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  /// A user holds exactly one role per organization.
+  @@unique([userId, orgId])
+  @@index([orgId, role])
+  @@map("memberships")
+}
+
+model Invitation {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  orgId       String    @db.Uuid
+  email       String    @db.VarChar(320)
+  role        OrgRole
+  /// Only the hash is stored. The raw token exists solely in the invite email.
+  tokenHash   String    @unique @db.Text
+  invitedById String    @db.Uuid
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invitedBy User         @relation("InvitationInvitedBy", fields: [invitedById], references: [id])
+
+  @@index([orgId, email])
+  @@index([expiresAt])
+  @@map("invitations")
+}
+
+/// Refresh-token family. Rotation with reuse detection: replaying a rotated
+/// token revokes the entire family, turning a stolen token into a single-use
+/// event instead of persistent access.
+model AuthSession {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  userId       String    @db.Uuid
+  /// SHA-256 of the opaque refresh token. The raw value never touches the DB.
+  tokenHash    String    @unique @db.Text
+  /// Shared by every token rotated from the same original login.
+  familyId     String    @db.Uuid
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  /// Set when this token was rotated, so a later replay is detectable.
+  rotatedAt    DateTime?
+  userAgent    String?   @db.VarChar(500)
+  ipAddress    String?   @db.VarChar(64)
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+model Event {
+  id       String      @id @default(uuid(7)) @db.Uuid
+  orgId    String      @db.Uuid
+  title    String      @db.VarChar(300)
+  description String?  @db.Text
+  /// Read aloud across a noisy room, so the alphabet excludes I/L/O/U.
+  joinCode String      @unique @db.VarChar(16)
+  slug     String      @db.VarChar(120)
+  type     EventType   @default(NETWORKING)
+  status   EventStatus @default(DRAFT)
+
+  startsAt DateTime?
+  endsAt   DateTime?
+  timezone String   @default("UTC") @db.VarChar(64)
+
+  /// Branding. Objects live in S3; only the key is stored.
+  logoKey     String? @db.VarChar(500)
+  accentColor String? @db.VarChar(9)
+
+  /// Opt-in public listing. Default false: an indexed event page would be a
+  /// privacy incident, so /e/* is noindex unless the organizer chooses.
+  isPubliclyListed Boolean @default(false)
+
+  /// The question currently being answered on stage, mirrored to the projector.
+  nowAnsweringQuestionId String? @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  org       Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  settings  EventSettings?
+  sessions  EventSession[]
+  attendees Attendee[]
+  questions Question[]
+  topics    Topic[]
+  summaries EventSummary[]
+  aiUsage   AiUsage[]
+
+  @@unique([orgId, slug])
+  @@index([orgId, status])
+  @@index([status, startsAt])
+  @@map("events")
+}
+
+model EventSettings {
+  eventId String @id @db.Uuid
+
+  moderationMode       ModerationMode       @default(PRE)
+  attendeeIdentityMode AttendeeIdentityMode @default(OPTIONAL)
+
+  allowUpvotes       Boolean @default(true)
+  allowAnonymousPost Boolean @default(true)
+  /// Grace period during which an attendee may still edit their own question.
+  editWindowSeconds  Int     @default(120)
+
+  minQuestionLength Int @default(10)
+  maxQuestionLength Int @default(500)
+
+  /// Sliding-window submission limit per attendee.
+  submitLimitCount         Int @default(5)
+  submitLimitWindowSeconds Int @default(60)
+
+  profanityFilter Boolean @default(true)
+
+  /// AI is OFF by default. With this false, EventQ makes zero API calls for
+  /// this event. Per-feature flags live in aiFeatures.
+  aiEnabled  Boolean @default(false)
+  aiFeatures Json    @default("{}")
+
+  /// Days after the event ends before attendee PII is purged automatically.
+  retentionDays Int @default(90)
+
+  locale String @default("en") @db.VarChar(10)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("event_settings")
+}
+
+/// A talk or track within an event. Inert for networking events; the unit that
+/// makes multi-track conferences work without a schema change later.
+model EventSession {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  eventId   String    @db.Uuid
+  title     String    @db.VarChar(300)
+  speaker   String?   @db.VarChar(200)
+  startsAt  DateTime?
+  endsAt    DateTime?
+  position  Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  event     Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  questions Question[]
+
+  @@index([eventId, position])
+  @@map("event_sessions")
+}
+
+/// Pseudonymous, DEVICE-SCOPED and EVENT-SCOPED participant identity.
+///
+/// The same person at two events is two Attendee rows. That is deliberate: it
+/// removes cross-event tracking entirely, which keeps the GDPR story simple and
+/// makes per-event PII purging a clean delete.
+model Attendee {
+  id      String @id @default(uuid(7)) @db.Uuid
+  eventId String @db.Uuid
+
+  /// All optional. Populated only when the event's identity mode asks for them.
+  displayName String? @db.VarChar(120)
+  company     String? @db.VarChar(200)
+  email       String? @db.VarChar(320)
+
+  isBlocked  Boolean   @default(false)
+  blockedAt  DateTime?
+  lastSeenAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+
+  event     Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  questions Question[]
+  votes     QuestionVote[]
+
+  @@index([eventId, isBlocked])
+  @@index([eventId, createdAt])
+  @@map("attendees")
+}
+
+// ---------------------------------------------------------------------------
+// Q&A
+// ---------------------------------------------------------------------------
+
+model Question {
+  id             String  @id @default(uuid(7)) @db.Uuid
+  eventId        String  @db.Uuid
+  eventSessionId String? @db.Uuid
+  attendeeId     String  @db.Uuid
+
+  body String @db.Text
+  /// NFKC-normalised, lowercased, punctuation-stripped. Powers the pg_trgm
+  /// index for zero-cost near-duplicate detection.
+  normalizedBody String @db.Text
+
+  status     QuestionStatus @default(PENDING)
+  /// Attendee chose to hide their name on this specific question.
+  isAnonymous Boolean       @default(false)
+
+  /// Denormalised, maintained in the same transaction as the vote. Reading a
+  /// live board must never aggregate votes across the table.
+  upvoteCount Int   @default(0)
+  /// upvotes / (age_hours + 2)^gravity, with a pinned boost. Computed in SQL.
+  rankScore   Float @default(0)
+
+  pinnedAt   DateTime?
+  answeredAt DateTime?
+
+  /// Duplicate resolution. The survivor absorbs this question's votes exactly
+  /// once; a self-reference or a cycle is rejected as a domain invariant.
+  mergedIntoQuestionId String? @db.Uuid
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  event        Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventSession EventSession? @relation(fields: [eventSessionId], references: [id], onDelete: SetNull)
+  attendee     Attendee      @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
+
+  mergedInto Question?  @relation("QuestionMerge", fields: [mergedIntoQuestionId], references: [id], onDelete: SetNull)
+  mergedFrom Question[] @relation("QuestionMerge")
+
+  topicId String? @db.Uuid
+  topic   Topic?  @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  votes             QuestionVote[]
+  answers           Answer[]
+  moderationActions ModerationAction[]
+  enrichment        QuestionEnrichment?
+
+  /// The hot board query: approved questions for an event, best first.
+  @@index([eventId, status, rankScore(sort: Desc)])
+  /// The moderation queue: newest pending first.
+  @@index([eventId, status, createdAt(sort: Desc)])
+  @@index([eventId, attendeeId])
+  @@index([mergedIntoQuestionId])
+  @@index([topicId])
+  @@map("questions")
+}
+
+model QuestionVote {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  questionId String   @db.Uuid
+  attendeeId String   @db.Uuid
+  createdAt  DateTime @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  attendee Attendee @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
+
+  /// Makes double-voting structurally impossible rather than a race the
+  /// application has to win.
+  @@unique([questionId, attendeeId])
+  @@index([attendeeId])
+  @@map("question_votes")
+}
+
+model Answer {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  questionId String   @db.Uuid
+  authorId   String   @db.Uuid
+  body       String   @db.Text
+  /// True when this text began as an AI suggestion a human then accepted.
+  /// Suggestions are never published without that explicit human step.
+  fromAiSuggestion Boolean @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  author   User     @relation(fields: [authorId], references: [id])
+
+  @@index([questionId])
+  @@map("answers")
+}
+
+/// Immutable moderation audit trail. Rows are appended, never updated.
+model ModerationAction {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  questionId String    @db.Uuid
+  actorType  ActorType
+  /// Null when actorType is SYSTEM or AI.
+  actorId    String?   @db.Uuid
+  action     String    @db.VarChar(64)
+  reason     String?   @db.Text
+  metadata   Json      @default("{}")
+  createdAt  DateTime  @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  actor    User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([questionId, createdAt])
+  @@map("moderation_actions")
+}
+
+// ---------------------------------------------------------------------------
+// Intelligence
+//
+// These tables are created now but WRITTEN BY NOTHING. No AI code exists in the
+// codebase and no AI SDK is installed. They are here because adding columns to
+// `questions` later would mean a migration on the hottest table in the system,
+// potentially while an event is live. Empty tables cost nothing.
+// ---------------------------------------------------------------------------
+
+model QuestionEnrichment {
+  questionId String @id @db.Uuid
+
+  status EnrichmentStatus @default(PENDING)
+
+  /// Populated by pg_trgm and local embeddings - both run on our own
+  /// infrastructure at zero API cost.
+  language      String? @db.VarChar(10)
+  /// pgvector column. Unsupported() because Prisma has no native vector type;
+  /// queries against it use raw SQL.
+  embedding     Unsupported("vector(384)")?
+
+  /// Populated only if Claude-backed classification is ever switched on.
+  category      String? @db.VarChar(64)
+  sentiment     String? @db.VarChar(32)
+  toxicityScore Float?
+  clarityScore  Float?
+  isQuestion    Boolean?
+
+  /// Provenance, so a result is reproducible and a prompt change is rollbackable.
+  modelId       String? @db.VarChar(100)
+  promptVersion String? @db.VarChar(32)
+
+  error       String?   @db.Text
+  attempts    Int       @default(0)
+  computedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("question_enrichments")
+}
+
+model Topic {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  eventId     String   @db.Uuid
+  label       String   @db.VarChar(200)
+  summary     String?  @db.Text
+  questionCount Int    @default(0)
+  centroid    Unsupported("vector(384)")?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  event     Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  questions Question[]
+
+  @@index([eventId])
+  @@map("topics")
+}
+
+model EventSummary {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  eventId     String   @db.Uuid
+  /// LIVE (regenerated during the event) or FINAL (generated once at end).
+  kind        String   @db.VarChar(16)
+  content     Json
+  modelId     String?  @db.VarChar(100)
+  generatedAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, kind])
+  @@map("event_summaries")
+}
+
+/// Token ledger. Every AI call would write one row BEFORE dispatch, and the
+/// per-event budget cap is checked against the running total. This is the
+/// mechanism that makes an unexpected bill structurally impossible rather than
+/// something to notice afterwards.
+model AiUsage {
+  id      String @id @default(uuid(7)) @db.Uuid
+  eventId String @db.Uuid
+  feature String @db.VarChar(32)
+  modelId String @db.VarChar(100)
+
+  tokensIn        Int @default(0)
+  tokensOut       Int @default(0)
+  cachedReadTokens Int @default(0)
+  /// Micro-dollars: 1_000_000 = $1.00. Integer maths, no float drift on money.
+  costMicros      Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, createdAt])
+  @@index([createdAt])
+  @@map("ai_usage")
+}
+
+// ---------------------------------------------------------------------------
+// Platform
+// ---------------------------------------------------------------------------
+
+/// Transactional outbox. Written in the SAME transaction as the domain change,
+/// then relayed to the queue. This is what prevents the classic "row committed,
+/// job lost" failure, and it makes Postgres - not Redis - the durable source of
+/// truth for background work.
+model OutboxEvent {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  aggregateType String    @db.VarChar(64)
+  aggregateId   String    @db.Uuid
+  eventType     String    @db.VarChar(100)
+  payload       Json
+  publishedAt   DateTime?
+  attempts      Int       @default(0)
+  lastError     String?   @db.Text
+  createdAt     DateTime  @default(now())
+
+  /// Partial index on unpublished rows: the relay polls this constantly, and it
+  /// must stay fast as the table grows.
+  @@index([publishedAt, createdAt])
+  @@index([aggregateType, aggregateId])
+  @@map("outbox_events")
+}
+
+model AuditLog {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  orgId      String    @db.Uuid
+  actorType  ActorType
+  actorId    String?   @db.Uuid
+  action     String    @db.VarChar(100)
+  entityType String    @db.VarChar(64)
+  entityId   String?   @db.Uuid
+  metadata   Json      @default("{}")
+  ipAddress  String?   @db.VarChar(64)
+  userAgent  String?   @db.VarChar(500)
+  createdAt  DateTime  @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
