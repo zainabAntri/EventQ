@@ -26,11 +26,32 @@ export const EventType = z.enum([
 export type EventType = z.infer<typeof EventType>;
 
 /**
- * Event lifecycle. Questions may only be submitted while LIVE — enforced as a
- * domain invariant, not a controller check.
+ * Event lifecycle.
+ *
+ *   DRAFT     being prepared; invisible outside the owning organization
+ *   PUBLISHED reachable by its public identifier
+ *   CLOSED    finished; readable by the organization, no longer public
+ *   ARCHIVED  soft-deleted; excluded from every list and lookup
+ *
+ * Deliberately four states, not six. An earlier draft also had SCHEDULED, LIVE
+ * and PAUSED, but SCHEDULED is just PUBLISHED with a future startsAt, and no
+ * rule in the product distinguishes LIVE from PAUSED. A state nothing branches
+ * on is cost without benefit.
  */
-export const EventStatus = z.enum(['DRAFT', 'SCHEDULED', 'LIVE', 'PAUSED', 'ENDED', 'ARCHIVED']);
+export const EventStatus = z.enum(['DRAFT', 'PUBLISHED', 'CLOSED', 'ARCHIVED']);
 export type EventStatus = z.infer<typeof EventStatus>;
+
+/**
+ * Who may reach an event through its public identifier.
+ *
+ *   PUBLIC   anyone holding the link or join code
+ *   PRIVATE  organization members only; the public endpoint reports 404
+ *
+ * PRIVATE returns 404 rather than 403 deliberately: 403 would confirm the join
+ * code is real, which turns the endpoint into a probe for valid codes.
+ */
+export const EventAccessMode = z.enum(['PUBLIC', 'PRIVATE']);
+export type EventAccessMode = z.infer<typeof EventAccessMode>;
 
 /**
  * Question lifecycle:

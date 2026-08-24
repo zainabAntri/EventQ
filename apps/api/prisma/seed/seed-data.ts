@@ -110,7 +110,7 @@ export const SEED_EVENT = {
   joinCode: 'EVENTQ26',
   slug: 'founders-and-funders',
   type: 'NETWORKING',
-  status: 'LIVE',
+  status: 'PUBLISHED',
 } as const;
 
 export const SEED_ORG = {

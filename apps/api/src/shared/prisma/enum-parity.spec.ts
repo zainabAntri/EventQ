@@ -4,6 +4,7 @@ import {
   ActorType,
   AttendeeIdentityMode,
   EnrichmentStatus,
+  EventAccessMode,
   EventStatus,
   EventType,
   ModerationMode,
@@ -29,6 +30,7 @@ const CASES: ReadonlyArray<{
 }> = [
   { name: 'EventType', contract: EventType.options, prisma: $Enums.EventType },
   { name: 'EventStatus', contract: EventStatus.options, prisma: $Enums.EventStatus },
+  { name: 'EventAccessMode', contract: EventAccessMode.options, prisma: $Enums.EventAccessMode },
   { name: 'QuestionStatus', contract: QuestionStatus.options, prisma: $Enums.QuestionStatus },
   { name: 'ModerationMode', contract: ModerationMode.options, prisma: $Enums.ModerationMode },
   {
