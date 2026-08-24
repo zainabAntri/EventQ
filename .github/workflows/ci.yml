@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A superseded push should not keep burning runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.x'
+
+jobs:
+  # Fast feedback: everything that needs no database runs first and in parallel
+  # with nothing else to wait for.
+  static:
+    name: Format, lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        # Includes the architecture boundary rules: a Prisma or Nest import
+        # inside a domain/ folder fails the build here.
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: eventq
+          POSTGRES_PASSWORD: eventq_ci
+          POSTGRES_DB: eventq
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U eventq"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://eventq:eventq_ci@localhost:5432/eventq?schema=public
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Verify migrations apply to a clean database
+        # Runs the migration files themselves, exactly as production does, so a
+        # broken migration fails here rather than on a deploy night.
+        run: pnpm db:deploy
+
+      - name: Verify schema shape
+        run: |
+          psql "$DATABASE_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name<>'_prisma_migrations'" | grep -qx 19
+          psql "$DATABASE_URL" -tAc "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','pg_trgm','pgcrypto')" | grep -qx 3
+        env:
+          PGPASSWORD: eventq_ci
+
+      - name: Seed is idempotent
+        # Two runs must leave identical row counts. Proven, not assumed.
+        run: |
+          pnpm db:seed > /dev/null
+          FIRST=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM questions")
+          pnpm db:seed > /dev/null
+          SECOND=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM questions")
+          test "$FIRST" = "$SECOND" || { echo "Seed is not idempotent: $FIRST then $SECOND"; exit 1; }
+        env:
+          PGPASSWORD: eventq_ci
+
+      - name: Integration tests
+        # Testcontainers starts its own throwaway Postgres, independent of the
+        # service container above.
+        run: pnpm test:integration
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm build
+        env:
+          # Build-time placeholders only. Real values come from Vercel and AWS
+          # Secrets Manager at deploy time and are never present in CI.
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_SITE_URL: http://localhost:3000
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a secret committed and later removed is still a leaked
+          # secret, and scanning only the tip would miss it entirely.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

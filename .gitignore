@@ -52,6 +52,11 @@ apps/api/test/**/*.map
 apps/api/prisma/**/*.js
 apps/api/prisma/**/*.d.ts
 apps/api/prisma/**/*.map
+
+# The Prisma CLI transpiles prisma.config.ts beside itself when it loads it.
+apps/api/prisma.config.js
+apps/api/prisma.config.d.ts
+apps/api/prisma.config.*.map
 !apps/api/prisma.config.ts
 
 # Local infrastructure volumes
