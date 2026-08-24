@@ -1,0 +1,25 @@
+{
+  "name": "@eventq/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared ESLint presets, including the architecture boundary rules",
+  "exports": {
+    "./eslint/base": "./eslint/base.js",
+    "./eslint/nest": "./eslint/nest.js",
+    "./eslint/next": "./eslint/next.js"
+  },
+  "scripts": {
+    "lint": "echo \"@eventq/config: presets only, nothing to lint\"",
+    "typecheck": "echo \"@eventq/config: presets only, nothing to typecheck\""
+  },
+  "dependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint-config-prettier": "^10.1.8",
+    "typescript-eslint": "^8.67.0"
+  },
+  "peerDependencies": {
+    "eslint": ">=10",
+    "typescript": ">=5.8"
+  }
+}

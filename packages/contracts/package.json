@@ -1,0 +1,35 @@
+{
+  "name": "@eventq/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Single source of truth for shared enums, permissions and wire formats",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rimraf dist *.tsbuildinfo",
+    "dev": "tsc --build --watch",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eventq/config": "workspace:*",
+    "eslint": "^10.9.0",
+    "rimraf": "^6.0.1",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.11"
+  }
+}

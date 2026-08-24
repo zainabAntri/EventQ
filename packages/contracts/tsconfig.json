@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // node16 emits CommonJS here (no "type": "module" in package.json), which
+    // is what the NestJS API needs to require this package. Next.js consumes
+    // CommonJS dependencies without any special handling, so one build output
+    // serves both apps and we avoid shipping a dual ESM/CJS package.
+    "module": "node16",
+    "moduleResolution": "node16",
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "composite": true,
+    "verbatimModuleSyntax": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+}

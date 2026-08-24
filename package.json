@@ -38,7 +38,7 @@
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs}": [
       "prettier --write",
-      "eslint --fix --max-warnings=0"
+      "eslint --fix --max-warnings=0 --no-warn-ignored"
     ],
     "*.{json,md,yml,yaml,css}": [
       "prettier --write"
@@ -46,8 +46,10 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
+    "@eventq/config": "workspace:*",
     "@playwright/test": "^1.62.1",
     "@types/node": "^22.10.5",
+    "eslint": "^10.9.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "prettier": "^3.4.2",
