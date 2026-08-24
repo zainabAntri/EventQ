@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Public } from '../../../shared/auth/auth.guard';
 import { CheckReadinessUseCase } from '../application/check-readiness.use-case';
 import type { ReadinessReport } from '../domain/health-probe.port';
 import { ApiZodResponse } from '../../../shared/validation/zod-dto';
@@ -17,6 +18,9 @@ import { LivenessResponse, ReadinessResponse } from './health.contracts';
  *   /health/ready  can serve traffic  -> checks dependencies, drains only
  */
 @ApiTags('health')
+// The load balancer has no credentials. Probes must stay reachable without
+// authentication, and they expose no data beyond up/down.
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(private readonly checkReadiness: CheckReadinessUseCase) {}

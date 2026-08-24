@@ -24,6 +24,12 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger));
   const config = app.get(AppConfigService);
 
+  // Behind an ALB, req.ip is the load balancer without this, which would make
+  // every request share one rate-limit bucket. Set to 1 rather than `true`:
+  // trusting the whole chain lets a client forge X-Forwarded-For and evade
+  // limiting entirely.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   app.use(
     helmet({
       // The API serves JSON, never HTML, so a restrictive default CSP is free.
@@ -51,7 +57,15 @@ async function bootstrap(): Promise<void> {
     origin: config.http.corsAllowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Idempotency-Key', 'X-Trace-Id'],
+    allowedHeaders: [
+      'Content-Type',
+      'Idempotency-Key',
+      'X-Trace-Id',
+      'Authorization',
+      // The CSRF header. A cross-site request cannot send it without passing a
+      // preflight against this exact allowlist.
+      'X-EventQ-Client',
+    ],
     exposedHeaders: ['X-Trace-Id', 'Retry-After'],
     maxAge: 86_400,
   });
