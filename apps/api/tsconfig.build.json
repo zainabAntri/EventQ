@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // TypeScript >= 6 requires an explicit rootDir when emitting. Only the
+    // build needs it, and only src/ is emitted.
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*.ts"],
+  // Build-only view of the project.
+  //
+  // `tsconfig.json` includes tests so `tsc --noEmit` typechecks them and the
+  // editor understands them. This config excludes them so `nest build` never
+  // emits spec files or the Testcontainers harness into dist/ — test code has
+  // no business in a production image, and its dev-only imports would not
+  // resolve there anyway.
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "prisma",
+    "**/*.spec.ts",
+    "**/*.test.ts",
+    "vitest.config.mts"
+  ]
+}

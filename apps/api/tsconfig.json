@@ -1,0 +1,42 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // NestJS DI reads constructor parameter types from decorator metadata,
+    // so both of these are load-bearing, not stylistic.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    // node16 rather than the legacy node10 resolution: node10 is deprecated in
+    // TypeScript 6 and cannot follow the `exports` map that Prisma 7's
+    // generated client relies on. This package has no "type": "module", so
+    // node16 still emits CommonJS, which is what Nest expects.
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+
+    // rootDir lives in tsconfig.build.json, not here. This config's job is
+    // typechecking (--noEmit), and it deliberately includes test/ and prisma/,
+    // which sit outside src/ and would otherwise trip TS6059.
+    "outDir": "./dist",
+
+    // Nest providers are assigned by the framework after construction.
+    "strictPropertyInitialization": false,
+
+    // CommonJS output needs real import statements, not type-only elision rules
+    // tuned for bundlers.
+    "verbatimModuleSyntax": false,
+    "isolatedModules": false,
+
+    // No baseUrl: deprecated in TypeScript 6. Since TS 5, `paths` entries
+    // resolve relative to this file, which is what we want anyway.
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  // Tests and the Prisma seed are included so `tsc --noEmit` typechecks them —
+  // a type error in a test should fail the build. `nest build` uses
+  // tsconfig.build.json instead, which excludes them from the emitted output.
+  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
