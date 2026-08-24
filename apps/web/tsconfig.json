@@ -1,0 +1,34 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["DOM", "DOM.Iterable", "ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "allowJs": true,
+    "noEmit": true,
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    // Test setup declares the jest-dom and custom a11y matchers via module
+    // augmentation. Without it in the program, `tsc --noEmit` cannot see them
+    // and every `expect(...).toBeInTheDocument()` is a type error. Including
+    // tests also means a type error in a test fails the build, which is the
+    // point of having types at all.
+    "test/**/*.ts",
+    // Config files must be in the program too, or typescript-eslint's project
+    // service cannot parse them and lint fails on the config itself.
+    "next.config.ts",
+    "vitest.config.mts",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": ["node_modules", ".next", "out"]
+}
