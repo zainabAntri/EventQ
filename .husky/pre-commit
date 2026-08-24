@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+
+# Formats and lints CHANGED FILES ONLY.
+#
+# Deliberately excludes tests and builds. A pre-commit hook that takes 90
+# seconds gets bypassed with --no-verify, and a hook everyone bypasses protects
+# nothing. Correctness is CI's job; this hook exists purely so a
+# formatting-only red build — the most common and most annoying kind — becomes
+# impossible.
+pnpm exec lint-staged

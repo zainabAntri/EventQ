@@ -1,0 +1,68 @@
+# Local development stack. Mirrors production services so "works on my machine"
+# means the same thing as "works on ECS":
+#   postgres -> RDS Postgres 16 (pgvector, pg_trgm)
+#   redis    -> ElastiCache Redis
+#   minio    -> S3
+#
+# Extensions are NOT created here. They are created by Prisma migrations so that
+# local, staging and production all get them through the identical code path.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: eventq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eventq
+      POSTGRES_PASSWORD: eventq_local_dev
+      POSTGRES_DB: eventq
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U eventq -d eventq']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: eventq-redis
+    restart: unless-stopped
+    # appendonly keeps BullMQ jobs across restarts. Redis is still treated as
+    # rebuildable — the outbox table in Postgres remains the source of truth.
+    command: redis-server --appendonly yes
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: eventq-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: eventq_minio
+      MINIO_ROOT_PASSWORD: eventq_minio_local_dev
+    ports:
+      - '9000:9000' # S3 API
+      - '9001:9001' # Web console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

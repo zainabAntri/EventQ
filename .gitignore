@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Turborepo
+.turbo/
+
+# Environment — never commit real secrets. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+
+# Test / coverage
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.recommended.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Prisma
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+
+# Compiled output must never sit beside its TypeScript source. A build config
+# regression can emit these into the source tree; they must never be committed.
+apps/api/src/**/*.js
+apps/api/src/**/*.d.ts
+apps/api/src/**/*.map
+apps/api/test/**/*.js
+apps/api/test/**/*.d.ts
+apps/api/test/**/*.map
+apps/api/prisma/**/*.js
+apps/api/prisma/**/*.d.ts
+apps/api/prisma/**/*.map
+!apps/api/prisma.config.ts
+
+# Local infrastructure volumes
+.docker-data/
+
+# CDK
+infra/cdk.out/
+infra/.cdk.staging/

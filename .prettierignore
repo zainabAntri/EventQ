@@ -1,0 +1,26 @@
+# Generated or vendored — never hand-formatted.
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+.turbo/
+pnpm-lock.yaml
+*.tsbuildinfo
+
+# Prisma owns the formatting of its own migration SQL.
+apps/api/prisma/migrations/
+
+# Playwright output
+playwright-report/
+test-results/
+blob-report/
+
+# Compiled output must never sit beside its source. If any of these appear,
+# a build config has regressed — see apps/api/tsconfig.build.json.
+apps/api/src/**/*.js
+apps/api/test/**/*.js
+apps/api/prisma/**/*.js
+**/*.d.ts
+**/*.map
