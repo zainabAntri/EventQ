@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { HealthController } from './presentation/health.controller';
 import { CheckReadinessUseCase } from './application/check-readiness.use-case';
 import { DatabaseHealthProbe } from './infrastructure/database-health.probe';
+import { RedisHealthProbe } from './infrastructure/redis-health.probe';
 import { HEALTH_PROBES } from './domain/health-probe.port';
 
 /**
@@ -19,10 +20,11 @@ import { HEALTH_PROBES } from './domain/health-probe.port';
   providers: [
     CheckReadinessUseCase,
     DatabaseHealthProbe,
+    RedisHealthProbe,
     {
       provide: HEALTH_PROBES,
-      useFactory: (database: DatabaseHealthProbe) => [database],
-      inject: [DatabaseHealthProbe],
+      useFactory: (database: DatabaseHealthProbe, redis: RedisHealthProbe) => [database, redis],
+      inject: [DatabaseHealthProbe, RedisHealthProbe],
     },
   ],
 })
