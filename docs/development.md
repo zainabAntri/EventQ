@@ -116,6 +116,21 @@ extension behaviour matches.
 
 ---
 
+## Dependencies that look unused but are not
+
+A naive "is this package imported by name?" scan flags three runtime
+dependencies. All three are required and must not be removed:
+
+| Package                    | Why it is never imported                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `@nestjs/platform-express` | The HTTP adapter `NestFactory.create()` loads by default. Removing it breaks boot, not compilation. |
+| `rxjs`                     | A hard peer dependency of `@nestjs/core`.                                                           |
+| `react-dom`                | Renders React. An App Router app never imports it directly.                                         |
+
+Anything else showing up as unused genuinely is — remove it.
+
+---
+
 ## Common problems
 
 **`@prisma/client has no exported member PrismaClient`**
