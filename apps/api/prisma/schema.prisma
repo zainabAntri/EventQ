@@ -46,11 +46,14 @@ enum EventType {
 
 enum EventStatus {
   DRAFT
-  SCHEDULED
-  LIVE
-  PAUSED
-  ENDED
+  PUBLISHED
+  CLOSED
   ARCHIVED
+}
+
+enum EventAccessMode {
+  PUBLIC
+  PRIVATE
 }
 
 enum QuestionStatus {
@@ -144,6 +147,7 @@ model User {
   invitationsSent   Invitation[]       @relation("InvitationInvitedBy")
   answers           Answer[]
   moderationActions ModerationAction[]
+  eventsCreated     Event[]            @relation("EventCreatedBy")
 
   @@index([deletedAt])
   @@map("users")
@@ -222,11 +226,23 @@ model Event {
   orgId    String      @db.Uuid
   title    String      @db.VarChar(300)
   description String?  @db.Text
+  /// Free text: a room, a full address or a video-call link all occur in
+  /// practice, and imposing structure on it helps nobody.
+  venue    String?     @db.VarChar(500)
   /// Read aloud across a noisy room, so the alphabet excludes I/L/O/U.
   joinCode String      @unique @db.VarChar(16)
   slug     String      @db.VarChar(120)
   type     EventType   @default(NETWORKING)
   status   EventStatus @default(DRAFT)
+
+  /// Which member created it. Nullable and SetNull on delete: an event must
+  /// outlive the departure of the person who set it up.
+  createdById String? @db.Uuid
+
+  /// Lifecycle timestamps. Kept separately from `status` because "when was this
+  /// published" is a real question that a single status column cannot answer.
+  publishedAt DateTime?
+  closedAt    DateTime?
 
   startsAt DateTime?
   endsAt   DateTime?
@@ -248,6 +264,7 @@ model Event {
   deletedAt DateTime?
 
   org       Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy User?          @relation("EventCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   settings  EventSettings?
   sessions  EventSession[]
   attendees Attendee[]
@@ -257,7 +274,8 @@ model Event {
   aiUsage   AiUsage[]
 
   @@unique([orgId, slug])
-  @@index([orgId, status])
+  /// The organizer dashboard query: an organization's events, newest first.
+  @@index([orgId, status, createdAt(sort: Desc)])
   @@index([status, startsAt])
   @@map("events")
 }
@@ -265,6 +283,9 @@ model Event {
 model EventSettings {
   eventId String @id @db.Uuid
 
+  /// Who may reach the event by its public identifier. PRIVATE makes the public
+  /// endpoint report 404 even when the event is published.
+  accessMode           EventAccessMode      @default(PUBLIC)
   moderationMode       ModerationMode       @default(PRE)
   attendeeIdentityMode AttendeeIdentityMode @default(OPTIONAL)
 

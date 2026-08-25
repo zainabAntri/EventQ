@@ -13,3 +13,4 @@ export * from './permissions.js';
 export * from './errors.js';
 export * from './realtime.js';
 export * from './auth.js';
+export * from './events.js';

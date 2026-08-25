@@ -9,6 +9,7 @@ import { ZodValidationPipe } from './shared/validation/zod-validation.pipe';
 import { AuthGuard } from './shared/auth/auth.guard';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { EventsModule } from './modules/events/events.module';
 
 /**
  * Composition root.
@@ -27,6 +28,7 @@ import { AuthModule } from './modules/auth/auth.module';
     // Features
     HealthModule,
     AuthModule,
+    EventsModule,
   ],
   providers: [
     {

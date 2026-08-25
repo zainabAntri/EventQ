@@ -107,7 +107,7 @@ async function seedMinimalEvent(db: TestDatabase, joinCode = 'TESTCODE') {
       title: 'Test Event',
       joinCode,
       slug: `event-${joinCode.toLowerCase()}`,
-      status: 'LIVE',
+      status: 'PUBLISHED',
       settings: { create: {} },
     },
   });
