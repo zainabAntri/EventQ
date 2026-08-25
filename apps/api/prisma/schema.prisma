@@ -384,6 +384,21 @@ model Question {
   /// index for zero-cost near-duplicate detection.
   normalizedBody String @db.Text
 
+  /// SHA-256 of normalizedBody.
+  ///
+  /// A stored column rather than a functional index on normalizedBody: btree
+  /// entries are capped at ~2.7 kB, a question is not, and Prisma cannot
+  /// express a functional index without reporting permanent schema drift. A
+  /// fixed-width hash sidesteps both.
+  bodyHash String @db.Char(64)
+
+  /// Value of the client's Idempotency-Key header, when it sent one.
+  ///
+  /// Venue wifi genuinely drops requests mid-flight. This is what makes the
+  /// retry safe: the second attempt matches the unique index below and returns
+  /// the question the first attempt already created.
+  idempotencyKey String? @db.VarChar(200)
+
   status     QuestionStatus @default(PENDING)
   /// Attendee chose to hide their name on this specific question.
   isAnonymous Boolean       @default(false)
@@ -420,6 +435,20 @@ model Question {
   moderationActions ModerationAction[]
   enrichment        QuestionEnrichment?
 
+  /// Asking the same thing twice is never intentional, so it is made
+  /// STRUCTURALLY impossible rather than left as a race the application has to
+  /// win against itself. Two concurrent identical submissions cannot both
+  /// commit; the loser surfaces as a clean 409.
+  ///
+  /// Scoped to the attendee, not the event — two different people independently
+  /// asking the same question is normal, and that case is a moderation
+  /// decision (merge), not a rejection.
+  @@unique([attendeeId, bodyHash])
+
+  /// Retry safety. NULLs are distinct in a Postgres unique index, so
+  /// submissions that carry no Idempotency-Key are unaffected by this.
+  @@unique([attendeeId, idempotencyKey])
+
   /// The hot board query: approved questions for an event, best first.
   @@index([eventId, status, rankScore(sort: Desc)])
   /// The moderation queue: newest pending first.
@@ -427,6 +456,11 @@ model Question {
   @@index([eventId, attendeeId])
   @@index([mergedIntoQuestionId])
   @@index([topicId])
+
+  /// Trigram index for near-duplicate detection. Runs on our own Postgres at
+  /// zero API cost, which is why duplicate detection works with AI switched
+  /// off — the default, and the only mode the product is shipped in.
+  @@index([normalizedBody(ops: raw("gin_trgm_ops"))], type: Gin)
   @@map("questions")
 }
 

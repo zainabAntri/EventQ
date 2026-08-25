@@ -4,6 +4,7 @@ import { Logger as NestLogger, RequestMethod } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import express from 'express';
 import { AppModule } from './app.module';
 import { AppConfigService } from './shared/config/app-config.service';
 import { OPENAPI_PATH, setupOpenApi } from './shared/openapi/setup-openapi';
@@ -43,6 +44,19 @@ async function bootstrap(): Promise<void> {
   );
 
   app.use(cookieParser());
+
+  /**
+   * An explicit, small ceiling on request bodies.
+   *
+   * Express defaults to 100 kB, which is generous for an API whose largest
+   * legitimate payload is a 500-character question. The limit is stated here
+   * rather than left implicit because it is a real control on a public,
+   * unauthenticated endpoint: a body is buffered in memory BEFORE any
+   * validation runs, so zod's length rules cannot protect against a large one.
+   * Rejecting at the transport layer is the only place that can.
+   */
+  app.use(express.json({ limit: '64kb' }));
+  app.use(express.urlencoded({ extended: false, limit: '64kb' }));
 
   /**
    * CORS for the Vercel <-> AWS split.

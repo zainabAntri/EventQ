@@ -1,5 +1,11 @@
 import type { z } from 'zod';
-import { isProblemDetails, type ProblemDetails, TRACE_ID_HEADER } from '@eventq/contracts';
+import {
+  CSRF_HEADER,
+  CSRF_HEADER_VALUE,
+  isProblemDetails,
+  type ProblemDetails,
+  TRACE_ID_HEADER,
+} from '@eventq/contracts';
 import { env } from '../env';
 
 /**
@@ -65,6 +71,8 @@ export async function apiRequest<TResponse extends z.ZodType>(
 ): Promise<z.infer<TResponse>> {
   const url = `${env.NEXT_PUBLIC_API_URL}/api/v1${path}`;
 
+  const method = options.method ?? 'GET';
+
   const headers: Record<string, string> = {
     Accept: 'application/json, application/problem+json',
   };
@@ -73,8 +81,24 @@ export async function apiRequest<TResponse extends z.ZodType>(
   // Server Components have no ambient cookie jar, so the caller forwards it.
   if (options.cookie) headers['Cookie'] = options.cookie;
 
+  /**
+   * CSRF header on every state-changing request.
+   *
+   * The API's AuthGuard requires this and checks it BEFORE the @Public()
+   * exemption, so it is needed on the attendee endpoints too — signing a victim
+   * in as the attacker, or posting a question in their name, are real attacks
+   * that being unauthenticated does not make harmless.
+   *
+   * It works because a custom header cannot be attached to a cross-site form
+   * POST at all, and a cross-origin XHR that tries must first pass a CORS
+   * preflight against the API's exact origin allowlist.
+   *
+   * Safe methods are exempt because they must not change state anyway.
+   */
+  if (method !== 'GET') headers[CSRF_HEADER] = CSRF_HEADER_VALUE;
+
   const response = await fetch(url, {
-    method: options.method ?? 'GET',
+    method,
     headers,
     // The reason the whole Vercel/AWS cookie design matters: without this the
     // session cookie is never sent and every authenticated call 401s.

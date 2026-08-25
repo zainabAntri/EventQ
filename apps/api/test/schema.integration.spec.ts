@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { startTestDatabase, type TestDatabase } from './database.harness';
+import { hashForComparison } from '../src/modules/questions/domain/question-text';
 
 /**
  * Proves the schema infrastructure actually behaves as designed against a real
@@ -114,12 +115,17 @@ async function seedMinimalEvent(db: TestDatabase, joinCode = 'TESTCODE') {
 
   const attendee = await db.prisma.attendee.create({ data: { eventId: event.id } });
 
+  const normalizedBody = 'how do you follow up after an event';
+
   const question = await db.prisma.question.create({
     data: {
       eventId: event.id,
       attendeeId: attendee.id,
       body: 'How do you follow up after an event?',
-      normalizedBody: 'how do you follow up after an event',
+      normalizedBody,
+      // Computed with the real domain function rather than a literal, so this
+      // fixture stays valid against the unique index that compares it.
+      bodyHash: hashForComparison(normalizedBody),
     },
   });
 

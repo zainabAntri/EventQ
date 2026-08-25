@@ -128,6 +128,12 @@ export const EventResponse = z.object({
   status: EventStatus,
   /** Public identifier, shown on screen and read aloud in the room. */
   joinCode: JoinCode,
+  /**
+   * The address the QR code points at. Derived server-side from the configured
+   * web origin rather than assembled by each client, so the printed poster, the
+   * dashboard and the projector cannot disagree about where attendees go.
+   */
+  joinUrl: z.url(),
   slug: z.string(),
   startsAt: z.iso.datetime().nullable(),
   endsAt: z.iso.datetime().nullable(),

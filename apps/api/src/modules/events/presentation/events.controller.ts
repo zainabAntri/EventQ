@@ -10,8 +10,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiParam, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import {
   CreateEventRequest,
   DeleteEventResponse,
@@ -32,6 +34,7 @@ import {
   ChangeEventStatusUseCase,
   CreateEventUseCase,
   DeleteEventUseCase,
+  GetEventQrCodeUseCase,
   GetEventUseCase,
   ListEventsUseCase,
   UpdateEventUseCase,
@@ -60,6 +63,7 @@ export class EventsController {
     private readonly createEvent: CreateEventUseCase,
     private readonly listEvents: ListEventsUseCase,
     private readonly getEvent: GetEventUseCase,
+    private readonly getQrCode: GetEventQrCodeUseCase,
     private readonly updateEvent: UpdateEventUseCase,
     private readonly changeStatus: ChangeEventStatusUseCase,
     private readonly deleteEvent: DeleteEventUseCase,
@@ -174,6 +178,32 @@ export class EventsController {
     @Ctx() context: RequestContext,
   ): Promise<EventResponse> {
     return this.changeStatus.close(eventId, context);
+  }
+
+  @Get(':eventId/qr')
+  @RequirePermissions('event:read')
+  @ApiOperation({
+    summary: 'QR code for the attendee page',
+    description:
+      "An SVG pointing at the event's joinUrl. SVG rather than PNG so it stays sharp printed on a poster or projected on a wall at any size, and so it can be styled by the page that embeds it.",
+  })
+  @ApiParam({ name: 'eventId', format: 'uuid' })
+  @ApiProduces('image/svg+xml')
+  @ApiResponse({ status: 200, description: 'The QR code as an SVG document.' })
+  async qrCode(
+    @Param('eventId', new ParseUUIDPipe({ version: '7' })) eventId: string,
+    @Ctx() context: RequestContext,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<string> {
+    const svg = await this.getQrCode.execute(eventId, context);
+
+    response.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    // Never cached by a shared proxy: the URL it encodes is only as private as
+    // the event itself, and an organizer revoking access should not be undone
+    // by a CDN still serving the old image.
+    response.setHeader('Cache-Control', 'private, max-age=300');
+
+    return svg;
   }
 
   @Delete(':eventId')

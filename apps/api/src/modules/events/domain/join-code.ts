@@ -39,6 +39,18 @@ export function generateJoinCode(randomBytes: RandomBytes): string {
 }
 
 /**
+ * The address a QR code points at.
+ *
+ * Derived on the server from one configured origin rather than assembled by
+ * each client, so the printed poster, the organizer dashboard and the projector
+ * cannot disagree about where attendees should go. Getting that wrong is not a
+ * cosmetic bug — it is a room full of people who cannot ask anything.
+ */
+export function joinUrlFor(webOrigin: string, joinCode: string): string {
+  return `${webOrigin.replace(/\/+$/, '')}/e/${joinCode}`;
+}
+
+/**
  * URL slug from a title.
  *
  * Unique only within an organization, so two organizations may both run an

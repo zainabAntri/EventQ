@@ -10,6 +10,7 @@ import { AuthGuard } from './shared/auth/auth.guard';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { EventsModule } from './modules/events/events.module';
+import { QuestionsModule } from './modules/questions/questions.module';
 
 /**
  * Composition root.
@@ -29,6 +30,7 @@ import { EventsModule } from './modules/events/events.module';
     HealthModule,
     AuthModule,
     EventsModule,
+    QuestionsModule,
   ],
   providers: [
     {

@@ -1,5 +1,6 @@
 import type { EventResponse, PublicEventResponse } from '@eventq/contracts';
 import type { EventRecord, PublicEventRecord } from '../domain/event.repository';
+import { joinUrlFor } from '../domain/join-code';
 
 /**
  * Record -> contract.
@@ -9,7 +10,7 @@ import type { EventRecord, PublicEventRecord } from '../domain/event.repository'
  * is how internal columns end up on the public wire without anyone deciding to
  * put them there.
  */
-export function toEventResponse(record: EventRecord): EventResponse {
+export function toEventResponse(record: EventRecord, webOrigin: string): EventResponse {
   return {
     id: record.id,
     title: record.title,
@@ -18,6 +19,9 @@ export function toEventResponse(record: EventRecord): EventResponse {
     type: record.type,
     status: record.status,
     joinCode: record.joinCode,
+    // Built here rather than by each client, so the poster, the dashboard and
+    // the projector cannot disagree about where attendees go.
+    joinUrl: joinUrlFor(webOrigin, record.joinCode),
     slug: record.slug,
     startsAt: record.startsAt?.toISOString() ?? null,
     endsAt: record.endsAt?.toISOString() ?? null,
