@@ -99,13 +99,28 @@ assert nothing and take real time to maintain.
 
 ---
 
-## What Phase 1 does not test
+## User journeys
 
-There are no user journeys yet, so the E2E suite is a smoke suite. Phase 2 adds
-the three that matter:
+**Journey 1 — scan → submit — is now real** (`e2e/attendee-submit.spec.ts`). It
+runs on both `chromium` and `mobile-safari`, and the WebKit project is the one
+that matters: attendees arrive by pointing a phone camera at a poster.
 
-1. scan → submit → approve → appears on the live board
+That project earns its keep. It caught a hydration race the Chromium run could
+not: the page is server-rendered, so the textarea paints and accepts focus
+before React has taken over, and a controlled input is re-rendered from React's
+own state the moment it does — discarding anything typed in that window.
+Chromium hydrates fast enough to hide it. The suite now waits for the join
+request (fired from a `useEffect`, which runs only after hydration) rather than
+guessing with a timeout.
+
+It also exposed a test that was passing for the wrong reason: filling a
+too-short question was being silently discarded, and the resulting EMPTY field
+produced the same validation error the test asserted. It would have passed with
+validation entirely broken.
+
+Still to come:
+
 2. the keyboard-driven moderation queue
 3. projector view updating in real time
 
-Writing fake journeys now would be theatre.
+Writing those before the screens exist would be theatre.

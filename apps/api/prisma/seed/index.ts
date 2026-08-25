@@ -10,6 +10,11 @@ import {
   SEED_QUESTIONS,
   SEED_USERS,
 } from './seed-data';
+import {
+  hashForComparison,
+  normalizeForComparison,
+  normalizeForStorage,
+} from '../../src/modules/questions/domain/question-text';
 
 /**
  * Development seed.
@@ -43,15 +48,13 @@ function resolvePassword(): { password: string; generated: boolean } {
   return { password: `dev-${randomBytes(9).toString('base64url')}`, generated: true };
 }
 
-/** Normalisation mirrors what the Question domain will do on submission. */
-function normalize(body: string): string {
-  return body
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+// Normalisation is IMPORTED from the question domain, not restated here.
+//
+// It used to be a local copy with a comment promising it "mirrors what the
+// Question domain will do on submission". Now that the domain exists, a copy
+// would be a second implementation free to drift from the real one — and the
+// bodyHash it produces is what a unique index compares, so a drift would show
+// up as duplicate detection quietly failing on seeded data.
 
 async function main(): Promise<void> {
   requireNonProduction();
@@ -92,7 +95,25 @@ async function main(): Promise<void> {
 
     await prisma.event.upsert({
       where: { id: SEED_EVENT.id },
-      update: { title: SEED_EVENT.title, status: SEED_EVENT.status },
+      // Every field that DEFINES the seeded event, not just a couple of them.
+      //
+      // Idempotent has to mean "converges on the declared state", not merely
+      // "creates no duplicates". With only title and status here, a row created
+      // by an older seed kept its original joinCode forever — so when the code
+      // changed to EVENTQ26, re-seeding silently did nothing and the database
+      // was left holding a value the JoinCode contract now rejects outright.
+      //
+      // Note that the CI idempotency check cannot catch this: it compares row
+      // COUNTS across two runs, and a non-converging update changes neither.
+      update: {
+        title: SEED_EVENT.title,
+        description: SEED_EVENT.description,
+        joinCode: SEED_EVENT.joinCode,
+        slug: SEED_EVENT.slug,
+        type: SEED_EVENT.type,
+        status: SEED_EVENT.status,
+        deletedAt: null,
+      },
       create: {
         id: SEED_EVENT.id,
         orgId: org.id,
@@ -135,6 +156,12 @@ async function main(): Promise<void> {
       const attendeeId = SEED_IDS.attendees[question.attendeeIndex];
       if (!attendeeId) throw new Error(`Bad attendeeIndex ${question.attendeeIndex}`);
 
+      // The SAME functions the submission path uses, imported rather than
+      // reimplemented. Seeded rows must hash identically to real ones, or the
+      // duplicate constraint would behave differently on seeded data than on
+      // anything a person actually asks.
+      const normalizedBody = normalizeForComparison(normalizeForStorage(question.body));
+
       await prisma.question.upsert({
         where: { id: question.id },
         update: { status: question.status, upvoteCount: question.upvoteCount },
@@ -143,7 +170,8 @@ async function main(): Promise<void> {
           eventId: SEED_EVENT.id,
           attendeeId,
           body: question.body,
-          normalizedBody: normalize(question.body),
+          normalizedBody,
+          bodyHash: hashForComparison(normalizedBody),
           status: question.status,
           upvoteCount: question.upvoteCount,
         },

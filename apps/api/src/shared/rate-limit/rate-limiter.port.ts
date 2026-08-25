@@ -44,4 +44,24 @@ export const RATE_LIMIT_RULES = {
   login: { name: 'auth:login', limit: 10, windowSeconds: 15 * 60 },
   refresh: { name: 'auth:refresh', limit: 60, windowSeconds: 60 * 60 },
   eventWrite: { name: 'event:write', limit: 60, windowSeconds: 60 },
+
+  /**
+   * The attendee surface, limited PER IP on top of the per-attendee allowance
+   * the event itself configures.
+   *
+   * Two layers, because each defeats a different attack. The per-attendee limit
+   * stops one person flooding; on its own it is trivially bypassed by minting a
+   * fresh identity per request, since joining needs no account. The per-IP limit
+   * stops that.
+   *
+   * The numbers are shaped by the real traffic pattern: a whole conference hall
+   * usually shares one NAT address, so 800 people scanning the same QR code
+   * within 90 seconds all arrive from one IP. A limit tight enough to stop a
+   * single scripted attacker would lock out an entire venue, so these are set
+   * to absorb a genuine room while still bounding automation — and the
+   * per-attendee limit does the precise work.
+   */
+  attendeeJoin: { name: 'attendee:join', limit: 300, windowSeconds: 60 },
+  questionSubmitPerIp: { name: 'question:submit:ip', limit: 120, windowSeconds: 60 },
+  publicRead: { name: 'public:read', limit: 600, windowSeconds: 60 },
 } as const satisfies Record<string, RateLimitRule>;

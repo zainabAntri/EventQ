@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { toString as renderQrCode } from 'qrcode';
 import type {
   CreateEventRequest,
   DeleteEventResponse,
@@ -9,6 +10,11 @@ import type {
   UpdateEventRequest,
 } from '@eventq/contracts';
 import type { RequestContext } from '../../../shared/auth/request-context';
+// Configuration is a shared cross-cutting concern, not infrastructure: the
+// layer rules forbid application/ from reaching for Prisma or HTTP, and this is
+// neither. The alternative — building the join URL in each controller — would
+// scatter one fact across several places.
+import { AppConfigService } from '../../../shared/config/app-config.service';
 import {
   EVENT_REPOSITORY,
   type EventRecord,
@@ -30,7 +36,7 @@ import {
   isPubliclyVisible,
   resolveDeletion,
 } from '../domain/event-lifecycle';
-import { generateJoinCode, slugifyTitle } from '../domain/join-code';
+import { generateJoinCode, joinUrlFor, slugifyTitle } from '../domain/join-code';
 import { CODE_GENERATOR, type CodeGenerator } from '../domain/code-generator.port';
 import { toEventResponse, toPublicEventResponse } from './event.mapper';
 
@@ -59,16 +65,60 @@ export class FindEventForOrganizerUseCase {
 
 @Injectable()
 export class GetEventUseCase {
-  constructor(private readonly find: FindEventForOrganizerUseCase) {}
+  constructor(
+    private readonly find: FindEventForOrganizerUseCase,
+    private readonly config: AppConfigService,
+  ) {}
 
   async execute(eventId: string, context: RequestContext): Promise<EventResponse> {
-    return toEventResponse(await this.find.execute(eventId, context));
+    return toEventResponse(await this.find.execute(eventId, context), this.config.http.webOrigin);
+  }
+}
+
+/**
+ * The QR code an attendee scans.
+ *
+ * Rendered here rather than behind a port, unlike CODE_GENERATOR: that one is
+ * injected because randomness must be made deterministic for a test, whereas
+ * this is a pure, deterministic transformation of a string. A port would be
+ * ceremony with nothing behind it.
+ *
+ * SVG rather than PNG, because this ends up printed on A3 posters and thrown at
+ * projector walls. A raster image has to guess a resolution and will be wrong
+ * for one of those; vectors are sharp at every size and are a fraction of the
+ * bytes.
+ */
+@Injectable()
+export class GetEventQrCodeUseCase {
+  constructor(
+    private readonly find: FindEventForOrganizerUseCase,
+    private readonly config: AppConfigService,
+  ) {}
+
+  async execute(eventId: string, context: RequestContext): Promise<string> {
+    // Goes through the same org-scoped lookup as every other read, so an event
+    // belonging to another organization is a 404 here too. A QR endpoint that
+    // skipped that check would happily render a code for someone else's event.
+    const event = await this.find.execute(eventId, context);
+
+    return renderQrCode(joinUrlFor(this.config.http.webOrigin, event.joinCode), {
+      type: 'svg',
+      // Medium error correction. A QR on a poster gets scuffed, partly covered
+      // and photographed at an angle; 'L' would fail in a real room, and 'H'
+      // would make the code denser than a phone camera can resolve from the
+      // back row for no benefit at this payload size.
+      errorCorrectionLevel: 'M',
+      margin: 2,
+    });
   }
 }
 
 @Injectable()
 export class ListEventsUseCase {
-  constructor(@Inject(EVENT_REPOSITORY) private readonly events: EventRepository) {}
+  constructor(
+    @Inject(EVENT_REPOSITORY) private readonly events: EventRepository,
+    private readonly config: AppConfigService,
+  ) {}
 
   async execute(query: EventListQuery, context: RequestContext): Promise<EventListResponse> {
     const page = await this.events.findManyForOrg({
@@ -79,7 +129,7 @@ export class ListEventsUseCase {
     });
 
     return {
-      items: page.items.map(toEventResponse),
+      items: page.items.map((event) => toEventResponse(event, this.config.http.webOrigin)),
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
     };
@@ -95,6 +145,7 @@ export class CreateEventUseCase {
   constructor(
     @Inject(EVENT_REPOSITORY) private readonly events: EventRepository,
     @Inject(CODE_GENERATOR) private readonly codes: CodeGenerator,
+    private readonly config: AppConfigService,
   ) {}
 
   async execute(request: CreateEventRequest, context: RequestContext): Promise<EventResponse> {
@@ -114,7 +165,7 @@ export class CreateEventUseCase {
       ...(await this.allocateIdentifiers(context.orgId, request.title)),
     });
 
-    return toEventResponse(created);
+    return toEventResponse(created, this.config.http.webOrigin);
   }
 
   private async allocateIdentifiers(orgId: string, title: string) {
@@ -150,6 +201,7 @@ export class UpdateEventUseCase {
   constructor(
     @Inject(EVENT_REPOSITORY) private readonly events: EventRepository,
     private readonly find: FindEventForOrganizerUseCase,
+    private readonly config: AppConfigService,
   ) {}
 
   async execute(
@@ -184,7 +236,10 @@ export class UpdateEventUseCase {
       isPubliclyListed: request.settings?.isPubliclyListed,
     };
 
-    return toEventResponse(await this.events.update(eventId, context.orgId, data));
+    return toEventResponse(
+      await this.events.update(eventId, context.orgId, data),
+      this.config.http.webOrigin,
+    );
   }
 }
 
@@ -193,6 +248,7 @@ export class ChangeEventStatusUseCase {
   constructor(
     @Inject(EVENT_REPOSITORY) private readonly events: EventRepository,
     private readonly find: FindEventForOrganizerUseCase,
+    private readonly config: AppConfigService,
   ) {}
 
   async publish(eventId: string, context: RequestContext): Promise<EventResponse> {
@@ -205,6 +261,7 @@ export class ChangeEventStatusUseCase {
         publishedAt: event.publishedAt ?? new Date(),
         closedAt: null,
       }),
+      this.config.http.webOrigin,
     );
   }
 
@@ -217,7 +274,10 @@ export class ChangeEventStatusUseCase {
       throw new EventHasParticipationError(participants);
     }
 
-    return toEventResponse(await this.events.setStatus(eventId, context.orgId, 'DRAFT'));
+    return toEventResponse(
+      await this.events.setStatus(eventId, context.orgId, 'DRAFT'),
+      this.config.http.webOrigin,
+    );
   }
 
   async close(eventId: string, context: RequestContext): Promise<EventResponse> {
@@ -226,6 +286,7 @@ export class ChangeEventStatusUseCase {
 
     return toEventResponse(
       await this.events.setStatus(eventId, context.orgId, 'CLOSED', { closedAt: new Date() }),
+      this.config.http.webOrigin,
     );
   }
 

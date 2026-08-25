@@ -34,6 +34,8 @@ export const ErrorCode = z.enum([
   // Questions
   'QUESTION_TOO_LONG',
   'QUESTION_TOO_SHORT',
+  /** This attendee already asked this exact question on this event. */
+  'DUPLICATE_QUESTION',
   'DUPLICATE_VOTE',
   'EDIT_WINDOW_CLOSED',
   'ATTENDEE_BLOCKED',
