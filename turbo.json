@@ -24,7 +24,14 @@
     },
     "test:integration": {
       "dependsOn": ["^build"],
-      "cache": false
+      "cache": false,
+      // Turbo 2 runs tasks in strict env mode, so a variable that is not named
+      // here is REMOVED from the task's environment — even when the CI job or
+      // the shell sets it. Without these, the suite silently lost DATABASE_URL
+      // and REDIS_URL and every test failed at import on config validation.
+      // The suite supplies its own placeholders (test/integration.setup.ts), so
+      // these only matter when someone points it at a real service.
+      "env": ["DATABASE_URL", "REDIS_URL", "CI"]
     },
     "clean": {
       "cache": false

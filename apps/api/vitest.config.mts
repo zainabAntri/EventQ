@@ -42,6 +42,11 @@ export default defineConfig({
         test: {
           name: 'integration',
           include: ['src/**/*.integration.spec.ts', 'test/**/*.integration.spec.ts'],
+          // Runs before the test files are imported, which is the only point
+          // early enough: AppModule validates the environment at IMPORT time,
+          // so a beforeAll hook is already too late. See the file for why this
+          // passed locally and failed in CI.
+          setupFiles: ['./test/integration.setup.ts'],
           // Containers take time to start and migrations must run first.
           testTimeout: 120_000,
           hookTimeout: 180_000,

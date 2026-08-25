@@ -37,19 +37,18 @@ export interface TestApp {
 export async function startTestApp(): Promise<TestApp> {
   const db = await startTestDatabase();
 
-  // The config module validates these at boot, so they must be present and
-  // valid. All placeholders - no real secret is involved.
-  process.env['NODE_ENV'] = 'test';
-  process.env['DATABASE_URL'] = db.connectionString;
-  process.env['REDIS_URL'] = process.env['REDIS_URL'] ?? 'redis://localhost:6379';
-  process.env['JWT_ACCESS_SECRET'] = 'test-access-secret-that-is-long-enough-1234567890';
-  process.env['ATTENDEE_TOKEN_SECRET'] = 'test-attendee-secret-that-is-different-0987654321';
-  process.env['WEB_ORIGIN'] = 'http://localhost:3000';
-  process.env['API_PUBLIC_URL'] = 'http://localhost:4000';
-  process.env['CORS_ALLOWED_ORIGINS'] = 'http://localhost:3000';
-  process.env['S3_BUCKET'] = 'test-bucket';
-  process.env['S3_ACCESS_KEY_ID'] = 'test-key';
-  process.env['S3_SECRET_ACCESS_KEY'] = 'test-secret';
+  // The environment is NOT set here. It cannot be: config.module.ts validates
+  // it inside a @Module decorator argument, which runs the moment AppModule is
+  // imported at the top of this file — before any beforeAll hook exists to run
+  // this function. Setting it here looked like it worked only because a
+  // gitignored apps/api/.env happened to satisfy the validation instead.
+  //
+  // test/integration.setup.ts owns it now, registered as a vitest setupFile so
+  // it runs before this module is even loaded. Add new variables THERE.
+  //
+  // Note the database below is the Testcontainers instance, injected as a
+  // provider rather than through DATABASE_URL — so the placeholder URL in the
+  // setup file is never connected to.
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     // The app must talk to the throwaway container, not whatever DATABASE_URL
