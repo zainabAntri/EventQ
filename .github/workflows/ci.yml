@@ -93,20 +93,42 @@ jobs:
         run: pnpm db:deploy
 
       - name: Verify schema shape
+        # `?schema=public` is a PRISMA parameter. psql goes through libpq, which
+        # treats a URI query string as connection keywords and rejects any it
+        # does not recognise — so the very same URL that Prisma migrates with is
+        # unusable here. Stripping the query string is what reconciles them.
+        #
+        # The counts are compared explicitly rather than piped into `grep -qx`.
+        # A silent grep reports only that the check failed, never what the value
+        # actually was, which is precisely the information needed to fix it.
         run: |
-          psql "$DATABASE_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name<>'_prisma_migrations'" | grep -qx 19
-          psql "$DATABASE_URL" -tAc "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','pg_trgm','pgcrypto')" | grep -qx 3
+          PSQL_URL="${DATABASE_URL%%\?*}"
+
+          assert_count() {
+            if [ "$3" != "$2" ]; then
+              echo "::error::$1: expected $2, found $3"
+              exit 1
+            fi
+            echo "$1: $3"
+          }
+
+          TABLES=$(psql "$PSQL_URL" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name<>'_prisma_migrations'")
+          assert_count "domain tables" 19 "$TABLES"
+
+          EXTENSIONS=$(psql "$PSQL_URL" -tAc "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','pg_trgm','pgcrypto')")
+          assert_count "required extensions" 3 "$EXTENSIONS"
         env:
           PGPASSWORD: eventq_ci
 
       - name: Seed is idempotent
         # Two runs must leave identical row counts. Proven, not assumed.
         run: |
+          PSQL_URL="${DATABASE_URL%%\?*}"
           pnpm db:seed > /dev/null
-          FIRST=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM questions")
+          FIRST=$(psql "$PSQL_URL" -tAc "SELECT count(*) FROM questions")
           pnpm db:seed > /dev/null
-          SECOND=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM questions")
-          test "$FIRST" = "$SECOND" || { echo "Seed is not idempotent: $FIRST then $SECOND"; exit 1; }
+          SECOND=$(psql "$PSQL_URL" -tAc "SELECT count(*) FROM questions")
+          test "$FIRST" = "$SECOND" || { echo "::error::Seed is not idempotent: $FIRST then $SECOND"; exit 1; }
         env:
           PGPASSWORD: eventq_ci
 

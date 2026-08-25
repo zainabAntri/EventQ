@@ -1,4 +1,4 @@
-import { defineConfig, env } from 'prisma/config';
+import { defineConfig } from 'prisma/config';
 
 // Prisma 7 no longer auto-loads .env. Node's built-in loader handles it with no
 // extra dependency. In CI and on ECS the variables are already in the
@@ -8,6 +8,23 @@ try {
 } catch {
   // No local .env — rely on the ambient environment.
 }
+
+/**
+ * Read directly rather than through prisma's `env()` helper.
+ *
+ * `env()` throws the moment this file is LOADED, which happens for every Prisma
+ * command — including `generate`, which never opens a connection. Since
+ * `prisma generate` runs as this package's postinstall hook, that turned a
+ * missing DATABASE_URL into a failed `pnpm install`: CI could not install at
+ * all in any job that had not set the variable, and a fresh clone could not
+ * install before someone had written a .env.
+ *
+ * Omitting the datasource entirely when the variable is absent keeps
+ * `generate` working, while `migrate`/`db` commands still fail — as they must,
+ * since they genuinely need a database — just at the point of use rather than
+ * at import time.
+ */
+const databaseUrl = process.env['DATABASE_URL'];
 
 /**
  * Prisma CLI configuration.
@@ -24,9 +41,7 @@ try {
  */
 export default defineConfig({
   schema: 'prisma/schema.prisma',
-  datasource: {
-    url: env('DATABASE_URL'),
-  },
+  ...(databaseUrl ? { datasource: { url: databaseUrl } } : {}),
   migrations: {
     path: 'prisma/migrations',
     // tsx rather than ts-node: it starts fast and needs no separate tsconfig.
