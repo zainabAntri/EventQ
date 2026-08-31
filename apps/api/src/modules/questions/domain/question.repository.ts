@@ -1,4 +1,4 @@
-import type { QuestionStatus } from '@eventq/contracts';
+import type { QuestionSort, QuestionStatus } from '@eventq/contracts';
 
 /**
  * Port: question and attendee persistence.
@@ -32,6 +32,10 @@ export interface QuestionRecord {
   createdAt: Date;
   updatedAt: Date;
   answeredAt: Date | null;
+  /** The stored ordering value. Every ranked read and every cursor uses it. */
+  rankScore: number;
+  /** Organizer priority, a ranking input. No endpoint sets it yet. */
+  pinnedAt: Date | null;
 }
 
 /** A question plus the moderation context only an organizer may see. */
@@ -39,6 +43,19 @@ export interface ModeratedQuestionRecord extends QuestionRecord {
   /** Signal names from the spam heuristics; empty for a clean submission. */
   flags: string[];
   possibleDuplicateOfQuestionId: string | null;
+  /** AI-derived topic. Null unless enrichment has run, which requires AI to be
+   *  switched on for the event — off by default and the only mode shipped. */
+  category: string | null;
+}
+
+/** Question counts for one event, by status. Powers the dashboard's tab badges
+ *  and its change detection in a single grouped query. */
+export interface QuestionStatusCounts {
+  counts: Record<QuestionStatus, number>;
+  /** Newest `updatedAt` across every question on the event, or null when there
+   *  are none. Combined with the counts, this moves on any insert, any status
+   *  change and any archive — which is exactly what a poller needs. */
+  lastChangedAt: Date | null;
 }
 
 export interface CreateQuestionData {
@@ -107,15 +124,28 @@ export interface QuestionRepository {
     limit: number;
   }): Promise<QuestionPage<QuestionRecord & { isMine: boolean }>>;
 
-  /** The moderation queue. org-scoped, so another organization's event returns
-   *  an empty page rather than its contents. */
+  /**
+   * The moderation queue. org-scoped, so another organization's event returns
+   * an empty page rather than its contents.
+   *
+   * `search` matches the normalised body, and normalisation is the CALLER's
+   * job — the repository must not know how question text is folded, or there
+   * would be two implementations of it and searches would stop matching what
+   * duplicate detection stored.
+   */
   findForModeration(input: {
     eventId: string;
     orgId: string;
     status?: QuestionStatus | undefined;
+    /** Already normalised for comparison. */
+    search?: string | undefined;
+    sort: QuestionSort;
     cursor?: string | undefined;
     limit: number;
   }): Promise<QuestionPage<ModeratedQuestionRecord>>;
+
+  /** Counts every status for one event, org-scoped like every other read here. */
+  countByStatusForOrg(eventId: string, orgId: string): Promise<QuestionStatusCounts>;
 
   findByIdForOrg(questionId: string, orgId: string): Promise<ModeratedQuestionRecord | null>;
 

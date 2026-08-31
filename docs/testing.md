@@ -124,3 +124,34 @@ Still to come:
 3. projector view updating in real time
 
 Writing those before the screens exist would be theatre.
+
+---
+
+## Tenant isolation and performance
+
+Two suites added with the organizer dashboard test properties rather than
+features, and both are worth knowing about before changing the question queries.
+
+`apps/api/test/dashboard.integration.spec.ts` asserts that **organizer A never
+receives organizer B's questions**, once per read path — the list, every status
+filter, search, every sort order, a cursor minted inside the other tenant, the
+counts endpoint, and the moderation write. Every one expects an EMPTY PAGE (or a
+404 on the write) rather than a 403, because a 403 confirms the id is real and
+turns the endpoint into an enumeration oracle. If you add a query shape to the
+question repository, add it here too: a new shape is a new chance to forget the
+`event: { orgId }` predicate.
+
+`apps/api/test/dashboard-performance.integration.spec.ts` runs every dashboard
+query against events of 100, 1,000 and 10,000 questions. It is a regression
+guard, not a benchmark — the thresholds sit two orders of magnitude above a
+healthy result, because it runs in a container on whatever machine CI gave us.
+What it exists to catch is a change in SHAPE: a query that stops using an index
+and starts sorting the whole event, a page that grows with the dataset because a
+limit was dropped, keyset pagination quietly replaced by an offset, or an N+1
+introduced by fetching something per question. Each of those turns a 20 ms query
+into a multi-second one at ten thousand rows — the scale where nobody notices in
+development and everybody notices during a keynote.
+
+Measured on a local container at 10,000 questions: ranked page 17 ms, search
+19 ms, counts 20 ms, and the fortieth page costs the same as the first, which is
+the keyset property stated as a number.

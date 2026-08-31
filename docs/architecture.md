@@ -70,7 +70,11 @@ Next.js App Router on Vercel. Server Components by default; `"use client"` pushe
 
 NestJS modular monolith with Clean Architecture inside each feature module, enforced by ESLint (see [development.md](development.md)).
 
-**Realtime is SSE, not WebSockets.** Every realtime need is server→client; client actions travel over REST. SSE gives plain HTTP through the ALB, no sticky sessions, and native reconnect with `Last-Event-ID`. Socket.IO would add a dependency, sticky sessions and a second protocol for no functional gain. An `EventPublisher` port keeps a WebSocket adapter possible if bidirectional needs ever appear.
+**Realtime is SSE, not WebSockets** — _where realtime is used at all_. Every realtime need is server→client; client actions travel over REST. SSE gives plain HTTP through the ALB, no sticky sessions, and native reconnect with `Last-Event-ID`. Socket.IO would add a dependency, sticky sessions and a second protocol for no functional gain. An `EventPublisher` port keeps a WebSocket adapter possible if bidirectional needs ever appear.
+
+**The organizer dashboard does not use it, and that is deliberate.** The protocol is specified in `@eventq/contracts/realtime.ts` and is intended for the projector and the attendee board, where a room full of people watch one screen. A moderation queue is a different problem: a handful of viewers, and a question arriving five seconds late is invisible to the person working through the list. Standing an SSE endpoint up for it would mean Redis fan-out across API instances, per-connection authentication, per-event subscription authorization, heartbeats and a stale-connection reaper — a permanent operational commitment bought with no user-visible gain.
+
+Instead the dashboard polls `GET /events/:id/questions/stats` every five seconds. That endpoint is a single grouped count over an indexed column; it returns the tab badges the dashboard needs anyway, plus a `version` token that moves on any insert, status change or archive. The expensive list query re-runs only when the token moves, and polling stops entirely while the browser tab is hidden. Anyone reading `realtime.ts` and expecting a live stream on the dashboard should read this paragraph first.
 
 **Background work uses a transactional outbox.** The domain change and its `OutboxEvent` commit together, then a relay publishes to the queue. This is what prevents "row committed, job lost", and it keeps Postgres — not Redis — the durable source of truth.
 

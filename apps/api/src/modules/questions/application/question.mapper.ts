@@ -2,14 +2,16 @@ import type {
   AttendeeSessionResponse,
   PublicQuestionResponse,
   QuestionResponse,
+  QuestionStatsResponse,
 } from '@eventq/contracts';
 import type {
   AttendeeRecord,
   ModeratedQuestionRecord,
   QuestionRecord,
+  QuestionStatusCounts,
 } from '../domain/question.repository';
 import type { EventSubmissionPolicy } from '../domain/event-policy.port';
-import { statusVisibleToAuthor } from '../domain/question-lifecycle';
+import { allowedActionsFor, statusVisibleToAuthor } from '../domain/question-lifecycle';
 
 /**
  * Record -> contract.
@@ -77,6 +79,39 @@ export function toQuestionResponse(record: ModeratedQuestionRecord): QuestionRes
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     answeredAt: record.answeredAt?.toISOString() ?? null,
+    rankScore: record.rankScore,
+    pinnedAt: record.pinnedAt?.toISOString() ?? null,
+    category: record.category,
+    // Derived from the same transition table the moderation endpoint enforces,
+    // so the dashboard renders exactly the buttons the API would accept.
+    allowedActions: [...allowedActionsFor(record.status)],
+  };
+}
+
+/**
+ * Counts and a change token.
+ *
+ * `version` is built here rather than in the repository because it is a
+ * transport concern: it exists so a client can compare two responses for
+ * equality, and its format is deliberately not part of the contract.
+ *
+ * It combines the total row count with the newest `updatedAt`, which between
+ * them move on every change a dashboard cares about — an insert lifts the
+ * count, and any moderation decision, archive or restore lifts the timestamp.
+ * Neither alone is sufficient: counts miss a status change, and a timestamp
+ * misses nothing but is null on an empty event.
+ */
+export function toQuestionStatsResponse(counts: QuestionStatusCounts): QuestionStatsResponse {
+  const values = Object.values(counts.counts);
+  const total = values.reduce((sum, count) => sum + count, 0);
+
+  return {
+    counts: counts.counts,
+    // ARCHIVED is the soft-deleted state and is excluded from the unfiltered
+    // queue, so the headline figure must exclude it too or the tab would
+    // promise rows the list does not return.
+    total: total - (counts.counts.ARCHIVED ?? 0),
+    version: `${total}:${counts.lastChangedAt?.getTime() ?? 0}`,
   };
 }
 

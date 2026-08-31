@@ -131,6 +131,25 @@ export const PublicQuestionListResponse = pageOf(PublicQuestionResponse);
 export type PublicQuestionListResponse = z.infer<typeof PublicQuestionListResponse>;
 
 /**
+ * Moderation is expressed as an ACTION, never as a target status.
+ *
+ * This is the concrete form of "the frontend cannot make arbitrary status
+ * changes". A client cannot name a destination state at all: it names an
+ * intent, and the server decides whether that intent is legal from the state
+ * the question is actually in.
+ */
+export const QuestionModerationAction = z.enum([
+  'approve',
+  'reject',
+  'spam',
+  'answer',
+  'archive',
+  /** Undo a negative decision — returns the question to the queue, not to the room. */
+  'restore',
+]);
+export type QuestionModerationAction = z.infer<typeof QuestionModerationAction>;
+
+/**
  * A question as a moderator sees it.
  *
  * Carries `flags` — the reasons the system routed this question to review or
@@ -152,27 +171,42 @@ export const QuestionResponse = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   answeredAt: z.iso.datetime().nullable(),
+
+  /**
+   * The value the server actually ordered by.
+   *
+   * Sent so a dashboard can justify the order it displays rather than asking a
+   * moderator to take it on faith. The absolute number is meaningless on its
+   * own — feed it and the fields above to `explainRankScore` for the four
+   * components that produced it.
+   */
+  rankScore: z.number(),
+
+  /** Organizer priority. Set by no endpoint yet; it is a ranking input the
+   *  score already honours, ready for the projector view to drive. */
+  pinnedAt: z.iso.datetime().nullable(),
+
+  /**
+   * AI-derived topic, when one exists.
+   *
+   * Null for every question until AI enrichment is switched on for the event —
+   * which is off by default and the only mode currently shipped. A dashboard
+   * therefore treats this as genuinely optional rather than as a field that is
+   * temporarily broken.
+   */
+  category: z.string().nullable(),
+
+  /**
+   * The moderation actions legal from this question's CURRENT state.
+   *
+   * Computed server-side from the same transition table that enforces them, so
+   * a dashboard cannot offer a button the API would refuse. The alternative —
+   * shipping the transition table to the client — would be a second copy of a
+   * rule that must never disagree with the first.
+   */
+  allowedActions: z.array(QuestionModerationAction),
 });
 export type QuestionResponse = z.infer<typeof QuestionResponse>;
-
-/**
- * Moderation is expressed as an ACTION, never as a target status.
- *
- * This is the concrete form of "the frontend cannot make arbitrary status
- * changes". A client cannot name a destination state at all: it names an
- * intent, and the server decides whether that intent is legal from the state
- * the question is actually in.
- */
-export const QuestionModerationAction = z.enum([
-  'approve',
-  'reject',
-  'spam',
-  'answer',
-  'archive',
-  /** Undo a negative decision — returns the question to the queue, not to the room. */
-  'restore',
-]);
-export type QuestionModerationAction = z.infer<typeof QuestionModerationAction>;
 
 export const ModerateQuestionRequest = z.object({
   action: QuestionModerationAction,
@@ -181,14 +215,82 @@ export const ModerateQuestionRequest = z.object({
 });
 export type ModerateQuestionRequest = z.infer<typeof ModerateQuestionRequest>;
 
+/**
+ * How a moderation queue is ordered.
+ *
+ * `rank` is the default and is the only one that is not a raw column sort — see
+ * ./ranking.ts for what it blends and why. The other three exist because a
+ * moderator sometimes needs a mechanical order they can reason about: "oldest
+ * first" is how you work a backlog without missing anyone, and "votes" answers
+ * "what does the room most want asked" directly.
+ */
+export const QuestionSort = z.enum(['rank', 'newest', 'oldest', 'votes']);
+export type QuestionSort = z.infer<typeof QuestionSort>;
+
+/**
+ * Shortest accepted search term.
+ *
+ * Two characters, because search runs against the pg_trgm index built for
+ * duplicate detection and a term shorter than a trigram cannot use it — it
+ * degrades to a full scan of the event's questions. Two is the point where the
+ * cost is still trivial at the sizes this dashboard is specified for.
+ */
+export const QUESTION_SEARCH_MIN_LENGTH = 2;
+
 /** The moderation queue. Cursor-paginated, because it mutates while it is read. */
 export const ModerationQueueQuery = CursorPaginationQuery.extend({
   status: QuestionStatus.optional(),
+  /**
+   * Free-text search over the question body.
+   *
+   * Matched against the NORMALISED form — the same lossy, accent-stripped,
+   * case-folded text that powers duplicate detection — so searching "cafe"
+   * finds "Café" and searching "dont" finds "don't". A moderator hunting for a
+   * question they half-remember should not have to reproduce its punctuation.
+   */
+  search: z.string().trim().min(QUESTION_SEARCH_MIN_LENGTH).max(200).optional(),
+  sort: QuestionSort.default('rank'),
 });
 export type ModerationQueueQuery = z.infer<typeof ModerationQueueQuery>;
 
 export const ModerationQueueResponse = pageOf(QuestionResponse);
 export type ModerationQueueResponse = z.infer<typeof ModerationQueueResponse>;
+
+/**
+ * Question counts for one event, by status.
+ *
+ * Serves two purposes at once, which is the reason it exists as its own
+ * endpoint rather than being folded into the queue response:
+ *
+ *   - it fills the count badges on the dashboard's status tabs, which would
+ *     otherwise need one list request per tab;
+ *   - `version` changes whenever anything in the event's questions changes, so
+ *     a dashboard can poll THIS — a single grouped count over an indexed
+ *     column — and re-run the expensive list query only when there is something
+ *     new to show.
+ *
+ * That second use is what replaces a realtime transport here. See the endpoint
+ * documentation for why SSE was not the right trade for this surface.
+ */
+export const QuestionStatsResponse = z.object({
+  /** One entry per status, including zeros — so a client never has to
+   *  distinguish "none" from "not reported". */
+  counts: z.record(QuestionStatus, z.number().int().nonnegative()),
+  /**
+   * Questions the unfiltered queue will return: everything except ARCHIVED,
+   * which is the soft-deleted state and is reachable only by asking for it.
+   */
+  total: z.number().int().nonnegative(),
+  /**
+   * Opaque change token.
+   *
+   * Derived from the row count and the newest `updatedAt`, so it moves on an
+   * insert, on any status change and on an archive. Compare it for equality
+   * only — its format is not part of this contract and will change.
+   */
+  version: z.string(),
+});
+export type QuestionStatsResponse = z.infer<typeof QuestionStatsResponse>;
 
 /**
  * Cookie carrying the attendee token.

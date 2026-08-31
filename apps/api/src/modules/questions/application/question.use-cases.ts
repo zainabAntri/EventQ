@@ -8,6 +8,7 @@ import type {
   PublicQuestionListResponse,
   PublicQuestionResponse,
   QuestionResponse,
+  QuestionStatsResponse,
   SubmitQuestionRequest,
 } from '@eventq/contracts';
 // Pure domain rules from the events module. Imported rather than restated:
@@ -34,7 +35,11 @@ import {
   type AttendeeTokenClaims,
   type AttendeeTokens,
 } from '../domain/attendee-tokens.port';
-import { normalizeDisplayName, normalizeQuestion } from '../domain/question-text';
+import {
+  normalizeDisplayName,
+  normalizeForComparison,
+  normalizeQuestion,
+} from '../domain/question-text';
 import { assessForSpam } from '../domain/spam-heuristics';
 import { canTransition, statusOnSubmission, targetStatusFor } from '../domain/question-lifecycle';
 import {
@@ -53,6 +58,7 @@ import {
   toAttendeeSessionResponse,
   toPublicQuestionResponse,
   toQuestionResponse,
+  toQuestionStatsResponse,
 } from './question.mapper';
 
 /**
@@ -293,10 +299,33 @@ export class ListModerationQueueUseCase {
     query: ModerationQueueQuery,
     context: RequestContext,
   ): Promise<ModerationQueueResponse> {
+    /**
+     * The search term is folded exactly as stored text was folded, here in the
+     * application layer where the rule already lives — so searching "cafe"
+     * finds "Café", and the repository never has to know how question text is
+     * normalised. Two implementations of that would drift, and the symptom
+     * would be a search that quietly stops matching.
+     */
+    const search = query.search ? normalizeForComparison(query.search) : undefined;
+
+    /**
+     * A term made entirely of punctuation normalises to nothing.
+     *
+     * Passing it through would become `contains: ''`, which matches every
+     * question — so a moderator searching "???" would be shown the whole event
+     * and reasonably conclude the search box is broken. An empty result is the
+     * honest answer.
+     */
+    if (search !== undefined && search.length === 0) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
     const page = await this.questions.findForModeration({
       eventId,
       orgId: context.orgId,
       status: query.status,
+      search,
+      sort: query.sort,
       cursor: query.cursor,
       limit: query.limit,
     });
@@ -306,6 +335,29 @@ export class ListModerationQueueUseCase {
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
     };
+  }
+}
+
+/**
+ * Question counts for one event.
+ *
+ * Small enough to be polled every few seconds, which is what it is for: the
+ * dashboard watches `version` here and re-runs the far more expensive list
+ * query only when it moves. That is the whole of EventQ's "realtime" story for
+ * this surface, and it is a deliberate choice rather than a missing feature —
+ * see the endpoint documentation for the argument against SSE here.
+ */
+@Injectable()
+export class GetQuestionStatsUseCase {
+  constructor(@Inject(QUESTION_REPOSITORY) private readonly questions: QuestionRepository) {}
+
+  async execute(eventId: string, context: RequestContext): Promise<QuestionStatsResponse> {
+    // Org-scoped like every other organizer read. An event owned by another
+    // organization reports all zeros — identical to one that exists and has no
+    // questions, so the endpoint cannot be used to probe for real event ids.
+    return toQuestionStatsResponse(
+      await this.questions.countByStatusForOrg(eventId, context.orgId),
+    );
   }
 }
 

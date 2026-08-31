@@ -1,4 +1,8 @@
-import type { ModerationMode, QuestionModerationAction, QuestionStatus } from '@eventq/contracts';
+// QuestionModerationAction is imported as a VALUE as well as a type: the zod
+// enum's `.options` is what keeps allowedActionsFor below in step with the
+// contract, so an action added there cannot be forgotten here.
+import { QuestionModerationAction } from '@eventq/contracts';
+import type { ModerationMode, QuestionStatus } from '@eventq/contracts';
 import type { SpamVerdict } from './spam-heuristics';
 
 /**
@@ -60,6 +64,27 @@ export function canTransition(from: QuestionStatus, to: QuestionStatus): boolean
 
 export function allowedTransitions(from: QuestionStatus): readonly QuestionStatus[] {
   return TRANSITIONS[from];
+}
+
+/**
+ * The actions a moderator may take on a question in this state.
+ *
+ * Derived from the transition table rather than listed separately, and sent to
+ * the dashboard on every question so the UI renders exactly the buttons the API
+ * would accept. The alternative — shipping the table to the client and letting
+ * it work this out — is a second copy of a rule that must never disagree with
+ * the first, and the disagreement would show up as a button that returns 422.
+ *
+ * It also answers "restore where appropriate" without the client needing to
+ * know what appropriate means: `restore` appears on a rejected or quarantined
+ * question, and on nothing else.
+ */
+export function allowedActionsFor(status: QuestionStatus): readonly QuestionModerationAction[] {
+  const reachable = TRANSITIONS[status];
+
+  return QuestionModerationAction.options.filter((action) =>
+    reachable.includes(ACTION_TARGET[action]),
+  );
 }
 
 /** The state a moderation action would move a question to. */

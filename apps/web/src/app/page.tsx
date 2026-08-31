@@ -40,7 +40,11 @@ export default function HomePage() {
       </dl>
 
       <p className="mt-12 text-sm text-[var(--color-muted,#666)]">
-        Phase 0 foundation. The organizer dashboard and attendee flow arrive in Phase 1.
+        Attendees can ask, and organizers can moderate.{' '}
+        <a className="underline underline-offset-2" href="/sign-in">
+          Sign in
+        </a>{' '}
+        to open your dashboard.
       </p>
     </main>
   );

@@ -4,6 +4,7 @@ import { PublicQuestionsController } from './presentation/public-questions.contr
 import { QuestionsController } from './presentation/questions.controller';
 import { AttendeeGuard } from './presentation/attendee.guard';
 import {
+  GetQuestionStatsUseCase,
   JoinEventUseCase,
   ListModerationQueueUseCase,
   ListPublicQuestionsUseCase,
@@ -41,6 +42,7 @@ import { ATTENDEE_TOKENS } from './domain/attendee-tokens.port';
     SubmitQuestionUseCase,
     ListPublicQuestionsUseCase,
     ListModerationQueueUseCase,
+    GetQuestionStatsUseCase,
     ModerateQuestionUseCase,
 
     // Presentation
