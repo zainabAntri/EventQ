@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { QuestionStatus, type QuestionModerationAction } from '@eventq/contracts';
 import {
+  allowedActionsFor,
   allowedTransitions,
   canTransition,
   isVisibleToRoom,
@@ -187,6 +188,76 @@ describe('visibility', () => {
   it('reports every other status to the author unchanged', () => {
     for (const status of ALL_STATUSES.filter((s) => s !== 'SPAM')) {
       expect(statusVisibleToAuthor(status)).toBe(status);
+    }
+  });
+});
+
+/**
+ * What the dashboard is allowed to offer.
+ *
+ * These actions are sent to the client on every question, so a bug here is not
+ * a wrong answer in a function — it is a button that appears and then fails, or
+ * one that never appears and leaves a moderator unable to act.
+ */
+describe('actions offered to a moderator', () => {
+  it('offers only actions whose destination the state machine permits', () => {
+    for (const status of ALL_STATUSES) {
+      for (const action of allowedActionsFor(status)) {
+        expect(
+          canTransition(status, targetStatusFor(action)),
+          `${status} offered "${action}", which it cannot perform`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('offers every action the state machine permits, leaving none unreachable', () => {
+    // The other direction, and the one a naive hand-written table gets wrong:
+    // a legal transition with no action offered is a moderator who simply
+    // cannot do something the domain allows.
+    for (const status of ALL_STATUSES) {
+      const reachable = new Set(allowedActionsFor(status).map(targetStatusFor));
+
+      for (const destination of allowedTransitions(status)) {
+        expect(
+          reachable.has(destination),
+          `${status} can move to ${destination} but no action offers it`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('offers restore on exactly the states a negative decision put a question in', () => {
+    // "Restore where appropriate" made concrete: undoing a rejection or a spam
+    // call, and nothing else.
+    const restorable = ALL_STATUSES.filter((status) =>
+      allowedActionsFor(status).includes('restore'),
+    );
+
+    expect([...restorable].sort()).toEqual(['REJECTED', 'SPAM']);
+  });
+
+  it('offers nothing at all on an archived question', () => {
+    // ARCHIVED is the soft-delete state and is terminal. A dashboard that
+    // rendered an action here would be offering to undo a deliberate removal.
+    expect(allowedActionsFor('ARCHIVED')).toEqual([]);
+  });
+
+  it('never offers approve as a one-click undo of a rejection', () => {
+    // The recovery path must not be a faster route to the room than the
+    // ordinary one. Restoring returns a question to the queue for a second look.
+    expect(allowedActionsFor('REJECTED')).not.toContain('approve');
+    expect(allowedActionsFor('SPAM')).not.toContain('approve');
+  });
+
+  it('lets an answered question be put back on the board', () => {
+    // A question answered by mistake, or reopened because the answer was wrong.
+    expect(allowedActionsFor('ANSWERED')).toContain('approve');
+  });
+
+  it('offers archive from every state that is not already archived', () => {
+    for (const status of ALL_STATUSES.filter((s) => s !== 'ARCHIVED')) {
+      expect(allowedActionsFor(status), `${status} cannot be archived`).toContain('archive');
     }
   });
 });

@@ -451,6 +451,11 @@ model Question {
 
   /// The hot board query: approved questions for an event, best first.
   @@index([eventId, status, rankScore(sort: Desc)])
+  /// The same query with no status filter — the organizer dashboard's default
+  /// view. Without this, ranking an event with ten thousand questions means
+  /// sorting all of them to return twenty-five; with it, Postgres walks the
+  /// index and stops at the page boundary.
+  @@index([eventId, rankScore(sort: Desc)])
   /// The moderation queue: newest pending first.
   @@index([eventId, status, createdAt(sort: Desc)])
   @@index([eventId, attendeeId])
