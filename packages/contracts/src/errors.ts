@@ -59,6 +59,8 @@ export const ErrorCode = z.enum([
   'AI_DISABLED',
   'AI_BUDGET_EXCEEDED',
   'AI_PROVIDER_ERROR',
+  /** The same AI action is already running for this event. One bill, not two. */
+  'AI_BUSY',
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

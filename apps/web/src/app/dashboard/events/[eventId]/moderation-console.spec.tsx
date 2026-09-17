@@ -68,6 +68,7 @@ const EVENT = {
     attendeeIdentityMode: 'OPTIONAL' as const,
     isPubliclyListed: false,
     allowUpvotes: true,
+    aiEnabled: false,
   },
   organizationId: '01930000-0000-7000-8000-0000000000a1',
   publishedAt: '2026-06-01T09:00:00.000Z',
@@ -98,6 +99,8 @@ function question(overrides: Partial<QuestionResponse> = {}): QuestionResponse {
     rankScore: 1_000,
     pinnedAt: null,
     category: null,
+    topic: null,
+    aiSuggestedAnswer: null,
     allowedActions: ['approve', 'reject', 'spam', 'archive'],
     ...overrides,
   };

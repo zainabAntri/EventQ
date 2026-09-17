@@ -566,6 +566,16 @@ model QuestionEnrichment {
   clarityScore  Float?
   isQuestion    Boolean?
 
+  /// An AI-DRAFTED answer for the organizer to read, edit or discard. Never
+  /// shown to attendees and never published on its own: the `answers` table
+  /// is the only thing the room sees, and only a person writes to it.
+  suggestedAnswer          String?   @db.Text
+  /// What the draft itself said it was unsure about, so the organizer sees
+  /// the model's own caveats rather than a confident-looking block of text.
+  suggestedAnswerCaveats   Json?
+  suggestedAnswerModelId   String?   @db.VarChar(100)
+  suggestedAnswerAt        DateTime?
+
   /// Provenance, so a result is reproducible and a prompt change is rollbackable.
   modelId       String? @db.VarChar(100)
   promptVersion String? @db.VarChar(32)
