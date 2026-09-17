@@ -6,6 +6,7 @@ import { CSRF_HEADER, CSRF_HEADER_VALUE } from '@eventq/contracts';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { RedisService } from '../src/shared/redis/redis.service';
+import { AI_PROVIDER, type AiProvider } from '../src/modules/ai/domain/ai-provider.port';
 import { startTestDatabase, type TestDatabase } from './database.harness';
 
 /**
@@ -34,7 +35,17 @@ export interface TestApp {
   stop: () => Promise<void>;
 }
 
-export async function startTestApp(): Promise<TestApp> {
+export interface TestAppOptions {
+  /**
+   * Replaces the AI provider for the whole app. The AI suite passes a scripted
+   * fake here, which is the ONLY way an AI endpoint ever answers in tests: no
+   * test may reach a real model, both because it would cost money and because
+   * a test that depends on a model's mood is not a test.
+   */
+  aiProvider?: AiProvider;
+}
+
+export async function startTestApp(options: TestAppOptions = {}): Promise<TestApp> {
   const db = await startTestDatabase();
 
   // The environment is NOT set here. It cannot be: config.module.ts validates
@@ -50,12 +61,17 @@ export async function startTestApp(): Promise<TestApp> {
   // provider rather than through DATABASE_URL — so the placeholder URL in the
   // setup file is never connected to.
 
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+  let builder = Test.createTestingModule({ imports: [AppModule] })
     // The app must talk to the throwaway container, not whatever DATABASE_URL
     // happened to be set when the process started.
     .overrideProvider(PrismaService)
-    .useValue(db.prisma)
-    .compile();
+    .useValue(db.prisma);
+
+  if (options.aiProvider) {
+    builder = builder.overrideProvider(AI_PROVIDER).useValue(options.aiProvider);
+  }
+
+  const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication({ logger: false });
   app.use(cookieParser());

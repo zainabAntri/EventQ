@@ -180,6 +180,7 @@ function settingsCreate(settings: CreateEventData['settings']) {
     // A boolean is tested against undefined, not truthiness: `false` is a
     // real instruction here, and the pattern above would silently drop it.
     ...(settings?.allowUpvotes !== undefined ? { allowUpvotes: settings.allowUpvotes } : {}),
+    ...(settings?.aiEnabled !== undefined ? { aiEnabled: settings.aiEnabled } : {}),
   };
 }
 
@@ -191,6 +192,7 @@ function settingsUpdate(settings: NonNullable<UpdateEventData['settings']>) {
       ? { attendeeIdentityMode: settings.attendeeIdentityMode }
       : {}),
     ...(settings.allowUpvotes !== undefined ? { allowUpvotes: settings.allowUpvotes } : {}),
+    ...(settings.aiEnabled !== undefined ? { aiEnabled: settings.aiEnabled } : {}),
   };
 }
 
@@ -217,6 +219,7 @@ interface EventRow {
     moderationMode: string;
     attendeeIdentityMode: string;
     allowUpvotes: boolean;
+    aiEnabled: boolean;
   } | null;
 }
 
@@ -249,6 +252,7 @@ function toRecord(event: EventRow): EventRecord {
       attendeeIdentityMode: (event.settings?.attendeeIdentityMode ??
         'OPTIONAL') as EventRecord['settings']['attendeeIdentityMode'],
       allowUpvotes: event.settings?.allowUpvotes ?? true,
+      aiEnabled: event.settings?.aiEnabled ?? false,
     },
   };
 }

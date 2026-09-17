@@ -22,6 +22,7 @@
     "prisma:seed": "prisma db seed"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
     "@eventq/contracts": "workspace:*",
     "@nestjs/common": "^11.2.1",
     "@nestjs/config": "^4.0.4",

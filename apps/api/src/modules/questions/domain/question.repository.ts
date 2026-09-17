@@ -62,6 +62,15 @@ export interface ModeratedQuestionRecord extends QuestionRecord {
   /** AI-derived topic. Null unless enrichment has run, which requires AI to be
    *  switched on for the event — off by default and the only mode shipped. */
   category: string | null;
+  /** The AI topic this question was grouped into, when clustering has run. */
+  topic: { id: string; label: string } | null;
+  /** An AI-drafted answer, for the moderator only. Null until one is requested. */
+  aiSuggestedAnswer: {
+    draft: string;
+    caveats: string[];
+    modelId: string;
+    generatedAt: Date;
+  } | null;
 }
 
 /** Question counts for one event, by status. Powers the dashboard's tab badges

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CursorPaginationQuery, EntityId, pageOf } from './primitives.js';
 import { AttendeeIdentityMode, ModerationMode, QuestionStatus } from './enums.js';
+import { AiSuggestedAnswer } from './ai.js';
 
 /**
  * Attendee participation contracts.
@@ -267,6 +268,15 @@ export const QuestionResponse = z.object({
    * temporarily broken.
    */
   category: z.string().nullable(),
+
+  /** The AI topic this question was grouped into, when clustering has run. */
+  topic: z.object({ id: EntityId, label: z.string() }).nullable(),
+
+  /**
+   * An AI-drafted answer for the moderator to read, edit or discard. Absent
+   * from the attendee shape by construction: it is a draft, not an answer.
+   */
+  aiSuggestedAnswer: AiSuggestedAnswer.nullable(),
 
   /**
    * The moderation actions legal from this question's CURRENT state.

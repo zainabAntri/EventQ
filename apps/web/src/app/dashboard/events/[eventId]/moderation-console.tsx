@@ -7,6 +7,7 @@ import { Alert, Button, FormField, Input, Label, LiveRegion, Spinner } from '@/c
 import { ApiError } from '@/lib/api-client';
 import { getEvent } from '@/lib/api-client/organizer';
 import { cn } from '@/lib/cn';
+import { AiPanel } from './ai-panel';
 import { QuestionCard } from './question-card';
 import { useModerationQueue, type StatusFilter } from './use-moderation-queue';
 
@@ -96,6 +97,18 @@ export function ModerationConsole({ eventId }: { eventId: string }) {
     <main id="main" className="mx-auto max-w-4xl px-5 py-8 sm:py-10">
       <EventHeader event={event} />
 
+      {/* Refreshing the event after the AI switch flips is what makes the
+          per-question AI buttons appear and disappear with it. */}
+      <AiPanel
+        eventId={eventId}
+        onQuestionsChanged={() => {
+          queue.refresh();
+          getEvent(eventId)
+            .then(setEvent)
+            .catch(() => {});
+        }}
+      />
+
       <StatusTabs
         active={queue.filters.status}
         stats={queue.stats}
@@ -160,7 +173,7 @@ export function ModerationConsole({ eventId }: { eventId: string }) {
         </div>
       ) : null}
 
-      <QuestionList queue={queue} />
+      <QuestionList queue={queue} aiEnabled={event?.settings.aiEnabled ?? false} />
 
       {/*
         Announced politely rather than assertively. A moderator using a screen
@@ -280,7 +293,13 @@ function StatusTabs({
   );
 }
 
-function QuestionList({ queue }: { queue: ReturnType<typeof useModerationQueue> }) {
+function QuestionList({
+  queue,
+  aiEnabled,
+}: {
+  queue: ReturnType<typeof useModerationQueue>;
+  aiEnabled: boolean;
+}) {
   if (queue.isLoading) {
     return (
       <div className="mt-10 flex justify-center" role="status" aria-label="Loading questions">
@@ -320,6 +339,9 @@ function QuestionList({ queue }: { queue: ReturnType<typeof useModerationQueue> 
             onModerate={(id, action) => void queue.moderate(id, action)}
             onMerge={(id, into) => void queue.mergeInto(id, into)}
             onDismissDuplicate={(id) => void queue.dismissDuplicate(id)}
+            aiEnabled={aiEnabled}
+            onDraftAnswer={(id) => void queue.draftAnswer(id)}
+            onFindSimilar={(id) => void queue.findSimilar(id)}
           />
         ))}
       </ul>

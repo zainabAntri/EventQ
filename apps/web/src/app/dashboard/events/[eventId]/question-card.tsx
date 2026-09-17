@@ -92,6 +92,13 @@ export interface QuestionCardProps {
   onMerge: (questionId: string, intoQuestionId: string) => void;
   /** "No, these are different questions." */
   onDismissDuplicate: (questionId: string) => void;
+  /**
+   * AI is on for this event. Only then are the per-question AI buttons
+   * offered; each is one model call the organizer chose to make.
+   */
+  aiEnabled?: boolean;
+  onDraftAnswer?: (questionId: string) => void;
+  onFindSimilar?: (questionId: string) => void;
 }
 
 export function QuestionCard({
@@ -100,6 +107,9 @@ export function QuestionCard({
   onModerate,
   onMerge,
   onDismissDuplicate,
+  aiEnabled = false,
+  onDraftAnswer,
+  onFindSimilar,
 }: QuestionCardProps) {
   const submitted = new Date(question.createdAt);
   const suggestion = question.possibleDuplicate;
@@ -141,9 +151,24 @@ export function QuestionCard({
           {formatRelativeTime(submitted)}
         </time>
 
+        {/* Category and topic are AI-produced, and say so: a chip that looked
+            like something a person typed would be a small lie on every card. */}
         {question.category ? (
-          <span className="rounded-full border border-[var(--border)] px-2 py-0.5">
+          <span
+            className="rounded-full border border-violet-500/40 px-2 py-0.5"
+            title="Category suggested by AI"
+          >
             {question.category}
+            <span className="sr-only"> (AI-suggested category)</span>
+          </span>
+        ) : null}
+        {question.topic ? (
+          <span
+            className="rounded-full border border-violet-500/40 px-2 py-0.5"
+            title="Topic grouped by AI"
+          >
+            {question.topic.label}
+            <span className="sr-only"> (AI-grouped topic)</span>
           </span>
         ) : null}
 
@@ -195,7 +220,38 @@ export function QuestionCard({
         </p>
       ) : null}
 
+      {question.aiSuggestedAnswer ? <DraftAnswer draft={question.aiSuggestedAnswer} /> : null}
+
       <RankExplanation question={question} />
+
+      {aiEnabled && question.status !== 'ARCHIVED' ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {onDraftAnswer ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              isLoading={isBusy}
+              loadingLabel="Drafting"
+              onClick={() => onDraftAnswer(question.id)}
+              title="One model call. Produces a draft for you to edit; nothing is published."
+            >
+              {question.aiSuggestedAnswer ? 'Redraft answer with AI' : 'Draft an answer with AI'}
+            </Button>
+          ) : null}
+          {onFindSimilar && !question.possibleDuplicate ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              isLoading={isBusy}
+              loadingLabel="Checking"
+              onClick={() => onFindSimilar(question.id)}
+              title="One model call. Suggests a duplicate for you to confirm; nothing is merged."
+            >
+              Check for a duplicate with AI
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       {question.allowedActions.length > 0 ? (
         <div className="mt-4 flex flex-wrap gap-2">
@@ -214,6 +270,43 @@ export function QuestionCard({
         </div>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * An AI-drafted answer, shown as exactly that.
+ *
+ * The label is text, not colour, so it survives a screen reader and a
+ * monochrome projector alike; the caveats the model gave are printed beneath
+ * it rather than folded away, because a draft that hides its own doubts
+ * reads as more certain than it is. There is no "Publish" button here on
+ * purpose: the draft is for the person to read and, if they choose, to say
+ * in their own words. Nothing on this card can send it to the room.
+ */
+function DraftAnswer({ draft }: { draft: NonNullable<QuestionResponse['aiSuggestedAnswer']> }) {
+  return (
+    <aside
+      aria-label="AI-drafted answer"
+      className="mt-3 rounded-md border border-violet-500/40 bg-violet-500/5 p-3 text-sm"
+    >
+      <p className="text-xs font-medium text-violet-700 dark:text-violet-300">
+        AI-generated draft · {draft.modelId} · not shown to attendees
+      </p>
+      <p className="mt-1.5 leading-relaxed break-words whitespace-pre-wrap">{draft.draft}</p>
+      {draft.caveats.length > 0 ? (
+        <ul
+          className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-[var(--muted)]"
+          aria-label="Caveats"
+        >
+          {draft.caveats.map((caveat) => (
+            <li key={caveat}>{caveat}</li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="mt-2 text-xs text-[var(--muted)]">
+        Read it, check it, and answer in your own words. It is a starting point, not an answer.
+      </p>
+    </aside>
   );
 }
 

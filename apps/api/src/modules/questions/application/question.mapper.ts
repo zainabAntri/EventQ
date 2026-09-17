@@ -96,6 +96,15 @@ export function toQuestionResponse(record: ModeratedQuestionRecord): QuestionRes
     rankScore: record.rankScore,
     pinnedAt: record.pinnedAt?.toISOString() ?? null,
     category: record.category,
+    topic: record.topic,
+    aiSuggestedAnswer: record.aiSuggestedAnswer
+      ? {
+          draft: record.aiSuggestedAnswer.draft,
+          caveats: record.aiSuggestedAnswer.caveats,
+          modelId: record.aiSuggestedAnswer.modelId,
+          generatedAt: record.aiSuggestedAnswer.generatedAt.toISOString(),
+        }
+      : null,
     // Derived from the same transition table the moderation endpoint enforces,
     // so the dashboard renders exactly the buttons the API would accept.
     allowedActions: [...allowedActionsFor(record.status)],

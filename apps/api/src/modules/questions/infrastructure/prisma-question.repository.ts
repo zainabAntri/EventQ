@@ -877,7 +877,16 @@ const MODERATION_SELECTION = {
    * the dashboard can render the moment anything writes it, rather than a
    * schema change made during a phase that is already about something else.
    */
-  enrichment: { select: { category: true } },
+  enrichment: {
+    select: {
+      category: true,
+      suggestedAnswer: true,
+      suggestedAnswerCaveats: true,
+      suggestedAnswerModelId: true,
+      suggestedAnswerAt: true,
+    },
+  },
+  topic: { select: { id: true, label: true } },
 } as const;
 
 interface QuestionRow {
@@ -906,7 +915,14 @@ type ModerationRow = QuestionRow & {
     upvoteCount: number;
   } | null;
   moderationActions: Array<{ metadata: unknown }>;
-  enrichment: { category: string | null } | null;
+  enrichment: {
+    category: string | null;
+    suggestedAnswer: string | null;
+    suggestedAnswerCaveats: unknown;
+    suggestedAnswerModelId: string | null;
+    suggestedAnswerAt: Date | null;
+  } | null;
+  topic: { id: string; label: string } | null;
 };
 
 /** Maps a row to the domain shape so no ORM type escapes this file. */
@@ -945,6 +961,31 @@ function toModeratedRecord(row: ModerationRow): ModeratedQuestionRecord {
       : null,
     mergedIntoQuestionId: row.mergedIntoQuestionId,
     category: row.enrichment?.category ?? null,
+    topic: row.topic,
+    aiSuggestedAnswer: readSuggestedAnswer(row.enrichment),
+  };
+}
+
+/** A draft is only reported when every part of it is present; a half-written
+ *  row reads as no draft rather than as a draft with a missing model. */
+function readSuggestedAnswer(
+  enrichment: ModerationRow['enrichment'],
+): ModeratedQuestionRecord['aiSuggestedAnswer'] {
+  if (
+    !enrichment?.suggestedAnswer ||
+    !enrichment.suggestedAnswerModelId ||
+    !enrichment.suggestedAnswerAt
+  ) {
+    return null;
+  }
+  const caveats = Array.isArray(enrichment.suggestedAnswerCaveats)
+    ? enrichment.suggestedAnswerCaveats.filter((c): c is string => typeof c === 'string')
+    : [];
+  return {
+    draft: enrichment.suggestedAnswer,
+    caveats,
+    modelId: enrichment.suggestedAnswerModelId,
+    generatedAt: enrichment.suggestedAnswerAt,
   };
 }
 

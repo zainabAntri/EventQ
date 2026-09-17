@@ -15,6 +15,8 @@ import {
   listQuestions,
   mergeQuestion,
   moderateQuestion,
+  runFindSimilar,
+  runSuggestAnswer,
 } from '@/lib/api-client/organizer';
 
 /**
@@ -94,6 +96,10 @@ export interface ModerationQueue {
   mergeInto: (questionId: string, intoQuestionId: string) => Promise<void>;
   /** Withdraws a duplicate suggestion without changing anything else. */
   dismissDuplicate: (questionId: string) => Promise<void>;
+  /** One model call: a draft answer, stored on the card. Never published. */
+  draftAnswer: (questionId: string) => Promise<void>;
+  /** One model call: a duplicate suggestion, for the moderator to confirm. */
+  findSimilar: (questionId: string) => Promise<void>;
 }
 
 export function useModerationQueue(eventId: string): ModerationQueue {
@@ -349,6 +355,62 @@ export function useModerationQueue(eventId: string): ModerationQueue {
     [applyDecision],
   );
 
+  /**
+   * The per-question AI actions. Neither returns a QuestionResponse, so they
+   * do not go through applyDecision; the draft is patched onto the card from
+   * the response, and a similarity match reloads the list so the card shows
+   * the same duplicate panel it would after a deterministic flag.
+   */
+  const draftAnswer = useCallback(
+    async (questionId: string): Promise<void> => {
+      setPendingActionOn(questionId);
+      setError(null);
+      try {
+        const result = await runSuggestAnswer(questionId);
+        setQuestions((current) =>
+          current.map((question) =>
+            question.id === questionId
+              ? {
+                  ...question,
+                  aiSuggestedAnswer: {
+                    draft: result.draft,
+                    caveats: result.caveats,
+                    modelId: result.modelId,
+                    generatedAt: result.generatedAt,
+                  },
+                }
+              : question,
+          ),
+        );
+      } catch (caught) {
+        handleFailure(caught);
+      } finally {
+        setPendingActionOn(null);
+      }
+    },
+    [handleFailure],
+  );
+
+  const findSimilar = useCallback(
+    async (questionId: string): Promise<void> => {
+      setPendingActionOn(questionId);
+      setError(null);
+      try {
+        const result = await runFindSimilar(questionId);
+        if (result.suggestion) {
+          setReloadToken((token) => token + 1);
+        } else {
+          setError('The AI did not find a question that asks the same thing.');
+        }
+      } catch (caught) {
+        handleFailure(caught);
+      } finally {
+        setPendingActionOn(null);
+      }
+    },
+    [handleFailure],
+  );
+
   return {
     questions,
     stats,
@@ -366,5 +428,7 @@ export function useModerationQueue(eventId: string): ModerationQueue {
     moderate,
     mergeInto,
     dismissDuplicate,
+    draftAnswer,
+    findSimilar,
   };
 }

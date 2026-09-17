@@ -11,6 +11,7 @@ import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { EventsModule } from './modules/events/events.module';
 import { QuestionsModule } from './modules/questions/questions.module';
+import { AiModule } from './modules/ai/ai.module';
 
 /**
  * Composition root.
@@ -31,6 +32,7 @@ import { QuestionsModule } from './modules/questions/questions.module';
     AuthModule,
     EventsModule,
     QuestionsModule,
+    AiModule,
   ],
   providers: [
     {

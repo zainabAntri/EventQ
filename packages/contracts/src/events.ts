@@ -50,6 +50,9 @@ export const EventSettingsInput = z.object({
    *  room's support is the point of the product, so switching it off is the
    *  deliberate choice. */
   allowUpvotes: z.boolean().optional(),
+  /** The organizer's own AI switch. Off by default; has no effect unless the
+   *  server has AI_ENABLED too. With it off, this event costs nothing. */
+  aiEnabled: z.boolean().optional(),
 });
 export type EventSettingsInput = z.infer<typeof EventSettingsInput>;
 
@@ -120,6 +123,7 @@ export const EventSettingsResponse = z.object({
   attendeeIdentityMode: AttendeeIdentityMode,
   isPubliclyListed: z.boolean(),
   allowUpvotes: z.boolean(),
+  aiEnabled: z.boolean(),
 });
 export type EventSettingsResponse = z.infer<typeof EventSettingsResponse>;
 
