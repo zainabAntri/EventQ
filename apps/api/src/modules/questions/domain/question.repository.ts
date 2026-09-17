@@ -38,11 +38,27 @@ export interface QuestionRecord {
   pinnedAt: Date | null;
 }
 
+/**
+ * The question a newer one may be repeating, with enough of it to compare the
+ * two side by side on one card.
+ */
+export interface DuplicateSuggestionRecord {
+  questionId: string;
+  body: string;
+  status: QuestionStatus;
+  upvoteCount: number;
+  /** 0–1. Null only for suggestions raised before a score was recorded. */
+  similarity: number | null;
+}
+
 /** A question plus the moderation context only an organizer may see. */
 export interface ModeratedQuestionRecord extends QuestionRecord {
   /** Signal names from the spam heuristics; empty for a clean submission. */
   flags: string[];
-  possibleDuplicateOfQuestionId: string | null;
+  /** A suggestion awaiting a moderator's confirmation or dismissal. */
+  possibleDuplicate: DuplicateSuggestionRecord | null;
+  /** Set once a moderator confirmed this question repeats another. */
+  mergedIntoQuestionId: string | null;
   /** AI-derived topic. Null unless enrichment has run, which requires AI to be
    *  switched on for the event — off by default and the only mode shipped. */
   category: string | null;
@@ -70,7 +86,22 @@ export interface CreateQuestionData {
   /** Written to the moderation audit trail as a SYSTEM action when non-empty,
    *  so a moderator can see why a question was held. */
   flags: string[];
-  possibleDuplicateOfQuestionId?: string | undefined;
+  /** The closest existing question, when one cleared the similarity threshold. */
+  possibleDuplicate?: { questionId: string; similarity: number } | undefined;
+}
+
+/** A candidate for duplicate detection, scored by the database on trigrams. */
+export interface SimilarityCandidateRecord {
+  id: string;
+  normalizedBody: string;
+  trigramSimilarity: number;
+}
+
+/** The state of one attendee's vote after a vote or unvote. */
+export interface VoteOutcome {
+  questionId: string;
+  upvoteCount: number;
+  hasVoted: boolean;
 }
 
 export interface QuestionPage<T> {
@@ -107,22 +138,54 @@ export interface QuestionRepository {
   findByBodyHash(attendeeId: string, bodyHash: string): Promise<QuestionRecord | null>;
 
   /**
-   * Near-duplicate detection via pg_trgm similarity.
+   * Candidate recall for duplicate detection: the live questions on this event
+   * that share the most character trigrams with the new text.
    *
    * Runs on our own Postgres at zero API cost — which is why this works with AI
-   * disabled, the default and only mode currently shipped. Returns the closest
-   * existing question above the similarity threshold, or null.
+   * disabled, the default and only mode currently shipped. The recall bar is
+   * deliberately LOW and the list short: the precise decision is made by the
+   * domain (question-similarity.ts), which also weighs the words, and this only
+   * has to make sure a reworded question is in the list at all.
    */
-  findSimilar(eventId: string, normalizedBody: string): Promise<{ id: string } | null>;
+  findSimilarityCandidates(
+    eventId: string,
+    normalizedBody: string,
+    limit: number,
+  ): Promise<SimilarityCandidateRecord[]>;
 
   /** The attendee's own view: everything visible to the room, plus their own
-   *  not-yet-approved questions and nobody else's. */
+   *  not-yet-approved questions and nobody else's. hasVoted is THIS
+   *  attendee's, so a refreshed page renders the right button state. */
   findVisibleForAttendee(input: {
     eventId: string;
     attendeeId: string;
     cursor?: string | undefined;
     limit: number;
-  }): Promise<QuestionPage<QuestionRecord & { isMine: boolean }>>;
+  }): Promise<QuestionPage<QuestionRecord & { isMine: boolean; hasVoted: boolean }>>;
+
+  /**
+   * Records an upvote, atomically with the counter and the score.
+   *
+   * Idempotent: an attendee who has already voted gets the current state back
+   * and nothing changes. Concurrent votes on one question are serialised by a
+   * row lock so the denormalised count can never drift from the vote rows.
+   *
+   * Returns null when the question is not one the room may vote on — absent,
+   * on another event, archived, or not visible to the room — and the caller
+   * reports that as not found, so an unpublished question cannot be probed.
+   */
+  castVote(input: {
+    questionId: string;
+    eventId: string;
+    attendeeId: string;
+  }): Promise<VoteOutcome | null>;
+
+  /** The inverse of castVote, with the same idempotency and the same null. */
+  withdrawVote(input: {
+    questionId: string;
+    eventId: string;
+    attendeeId: string;
+  }): Promise<VoteOutcome | null>;
 
   /**
    * The moderation queue. org-scoped, so another organization's event returns
@@ -163,6 +226,39 @@ export interface QuestionRepository {
     actorId: string;
     action: string;
     reason?: string | undefined;
+  }): Promise<ModeratedQuestionRecord>;
+
+  /**
+   * Confirms a duplicate: archives questionId and moves its votes onto
+   * intoQuestionId, all in one transaction.
+   *
+   * Votes transfer EXACTLY ONCE. An attendee who voted for both keeps one vote
+   * on the survivor, not two — the unique index decides, not application code.
+   * The survivor's count and score are recomputed from its vote rows afterwards
+   * rather than incremented, so a concurrent live vote cannot leave the counter
+   * off by one.
+   *
+   * The caller validates the pair (same event, not self, target not itself
+   * merged); the transaction re-checks the target under a lock, because an
+   * organizer could merge the target away between the read and this write.
+   */
+  mergeQuestion(input: {
+    questionId: string;
+    intoQuestionId: string;
+    orgId: string;
+    actorId: string;
+  }): Promise<ModeratedQuestionRecord>;
+
+  /**
+   * Withdraws a duplicate suggestion — "no, these are different questions".
+   *
+   * Clears the suggestion and appends an audit row in one transaction, so the
+   * trail shows both that the system raised it and that a person overruled it.
+   */
+  dismissDuplicate(input: {
+    questionId: string;
+    orgId: string;
+    actorId: string;
   }): Promise<ModeratedQuestionRecord>;
 }
 

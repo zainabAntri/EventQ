@@ -64,4 +64,19 @@ export const RATE_LIMIT_RULES = {
   attendeeJoin: { name: 'attendee:join', limit: 300, windowSeconds: 60 },
   questionSubmitPerIp: { name: 'question:submit:ip', limit: 120, windowSeconds: 60 },
   publicRead: { name: 'public:read', limit: 600, windowSeconds: 60 },
+
+  /**
+   * Voting, per ATTENDEE and per IP.
+   *
+   * The per-attendee rule is the precise one: thirty changes a minute is far
+   * beyond a human deciding what they support, and well under what a script
+   * flipping one vote on and off would attempt. The per-IP rule is deliberately
+   * loose — a speaker saying "vote now" can make several hundred people on one
+   * venue address act within the same few seconds, and a limit that refused
+   * them would be worse than the abuse it prevents. Its job is only to bound a
+   * script that mints fresh identities to vote repeatedly, and that script is
+   * already capped by attendeeJoin above.
+   */
+  questionVote: { name: 'question:vote', limit: 30, windowSeconds: 60 },
+  questionVotePerIp: { name: 'question:vote:ip', limit: 1200, windowSeconds: 60 },
 } as const satisfies Record<string, RateLimitRule>;

@@ -4,12 +4,15 @@ import type {
   CursorPaginationQuery,
   ModerateQuestionRequest,
   ModerationQueueQuery,
+  MergeQuestionRequest,
   ModerationQueueResponse,
   PublicQuestionListResponse,
   PublicQuestionResponse,
   QuestionResponse,
   QuestionStatsResponse,
+  QuestionStatus,
   SubmitQuestionRequest,
+  VoteResponse,
 } from '@eventq/contracts';
 // Pure domain rules from the events module. Imported rather than restated:
 // duplicating "which events are publicly reachable" is how two answers to one
@@ -17,13 +20,19 @@ import type {
 import { isPubliclyVisible } from '../../events/domain/event-lifecycle';
 import { EventNotFoundError } from '../../events/domain/event.errors';
 import type { RequestContext } from '../../../shared/auth/request-context';
-import { RATE_LIMITER, type RateLimiter } from '../../../shared/rate-limit/rate-limiter.port';
+import {
+  RATE_LIMITER,
+  RATE_LIMIT_RULES,
+  type RateLimiter,
+} from '../../../shared/rate-limit/rate-limiter.port';
+import { RateLimitedError } from '../../../shared/errors/domain-error';
 import {
   ATTENDEE_REPOSITORY,
   QUESTION_REPOSITORY,
   type AttendeeRecord,
   type AttendeeRepository,
   type QuestionRepository,
+  type VoteOutcome,
 } from '../domain/question.repository';
 import {
   EVENT_POLICY_READER,
@@ -41,11 +50,14 @@ import {
   normalizeQuestion,
 } from '../domain/question-text';
 import { assessForSpam } from '../domain/spam-heuristics';
+import { findBestDuplicate } from '../domain/question-similarity';
 import { canTransition, statusOnSubmission, targetStatusFor } from '../domain/question-lifecycle';
 import {
   AttendeeBlockedError,
   AttendeeSessionRequiredError,
+  CannotMergeIntoSelfError,
   DuplicateQuestionError,
+  InvalidMergeTargetError,
   EventNotAcceptingQuestionsError,
   IdentityRequiredError,
   InvalidQuestionTransitionError,
@@ -53,6 +65,7 @@ import {
   QuestionTooLongError,
   QuestionTooShortError,
   SubmissionLimitReachedError,
+  VotingDisabledError,
 } from '../domain/question.errors';
 import {
   toAttendeeSessionResponse,
@@ -67,6 +80,15 @@ import {
  * session, never from a path or payload. Both are the same rule: the identity a
  * caller acts under is derived from what they proved, not from what they said.
  */
+
+/**
+ * How many nearest questions the database hands to the domain for scoring.
+ *
+ * Ten is plenty: the domain picks the single best, and a question genuinely
+ * similar to more than ten others is itself the event's recurring theme, not a
+ * duplicate of any one of them.
+ */
+const SIMILARITY_CANDIDATE_LIMIT = 10;
 
 /**
  * First scan.
@@ -172,7 +194,7 @@ export class SubmitQuestionUseCase {
     if (input.idempotencyKey) {
       const already = await this.questions.findByIdempotencyKey(attendee.id, input.idempotencyKey);
       if (already) {
-        return toPublicQuestionResponse({ ...already, isMine: true }, policy);
+        return toPublicQuestionResponse({ ...already, isMine: true, hasVoted: false }, policy);
       }
     }
 
@@ -206,7 +228,19 @@ export class SubmitQuestionUseCase {
     // 9. Near-duplicate detection routes to a moderator, never rejects: two
     //    people independently asking something similar is normal, and merging
     //    is a moderation decision rather than a reason to refuse someone.
-    const similar = await this.questions.findSimilar(eventId, normalized.normalizedBody);
+    //
+    //    Two stages. The database recalls a short list of the nearest questions
+    //    by character trigrams — cheap, indexed, and deliberately generous. The
+    //    domain then scores each one on both spelling AND content words, so a
+    //    reworded question ("how can businesses use AI" against "how can I use
+    //    AI in my company") is caught even though its trigram score alone
+    //    would never clear the bar. All of it at zero API cost.
+    const candidates = await this.questions.findSimilarityCandidates(
+      eventId,
+      normalized.normalizedBody,
+      SIMILARITY_CANDIDATE_LIMIT,
+    );
+    const similar = findBestDuplicate(normalized.normalizedBody, candidates);
 
     const flags = [...assessment.signals];
     if (similar) flags.push('possible_duplicate');
@@ -226,13 +260,16 @@ export class SubmitQuestionUseCase {
       isAnonymous: identity.isAnonymous,
       idempotencyKey: input.idempotencyKey,
       flags,
-      possibleDuplicateOfQuestionId: similar?.id,
+      possibleDuplicate: similar
+        ? { questionId: similar.id, similarity: similar.similarity }
+        : undefined,
     });
 
     await this.attendees.touch(attendee.id, identity.displayName ?? undefined);
 
+    // A question nobody has seen yet has no votes, its author's included.
     return toPublicQuestionResponse(
-      { ...created, authorName: identity.displayName, isMine: true },
+      { ...created, authorName: identity.displayName, isMine: true, hasVoted: false },
       policy,
     );
   }
@@ -398,6 +435,202 @@ export class ModerateQuestionUseCase {
         actorId: context.userId,
         action: request.action,
         reason: request.reason,
+      }),
+    );
+  }
+}
+
+/**
+ * Voting.
+ *
+ * ---------------------------------------------------------------------------
+ * Who is "one person" when nobody has an account?
+ * ---------------------------------------------------------------------------
+ *
+ * The identity a vote is attached to is the attendee token: a signed,
+ * event-scoped claim minted on first scan and carried in an httpOnly cookie.
+ * That is what is trusted here — never a body field, and never the IP address,
+ * because a conference hall shares one NAT address between hundreds of
+ * legitimate people. The token proves "we issued this id, for this event"; the
+ * database's unique index on (question, attendee) then makes a second vote
+ * from the same identity structurally impossible rather than a race.
+ *
+ * Four layers, each covering another's blind spot:
+ *
+ *   signed token     a vote cannot be cast for an identity that never joined
+ *   unique index     one vote per identity per question, decided by Postgres
+ *   per-attendee     one identity cannot flip a vote a hundred times a minute
+ *   per-IP (loose)   a script minting fresh identities is bounded, without a
+ *                    limit tight enough to throttle a real room
+ *
+ * The honest limit: a device that discards its cookie is a new attendee and
+ * may vote again. Without accounts that is not fixable — only fingerprinting
+ * would close it, and fingerprinting is the cross-device tracking this product
+ * promises never to do. It is contained instead: joining is rate limited per
+ * IP, and the ranking formula counts votes as log10(votes + 1), so a hundred
+ * manufactured votes buy about four points — roughly two hours of recency.
+ * Manipulation is possible, expensive, and nearly worthless.
+ *
+ * Both operations are IDEMPOTENT. A double-tap, a retry after a dropped
+ * response and a page refresh all produce the same state as one honest vote,
+ * and none of them produce an error the attendee has to understand.
+ */
+@Injectable()
+export class VoteOnQuestionUseCase {
+  constructor(
+    @Inject(EVENT_POLICY_READER) private readonly policies: EventPolicyReader,
+    @Inject(ATTENDEE_REPOSITORY) private readonly attendees: AttendeeRepository,
+    @Inject(QUESTION_REPOSITORY) private readonly questions: QuestionRepository,
+    @Inject(RATE_LIMITER) private readonly rateLimiter: RateLimiter,
+  ) {}
+
+  cast(input: VoteInput): Promise<VoteResponse> {
+    return this.apply(input, (scope) => this.questions.castVote(scope));
+  }
+
+  withdraw(input: VoteInput): Promise<VoteResponse> {
+    return this.apply(input, (scope) => this.questions.withdrawVote(scope));
+  }
+
+  private async apply(
+    input: VoteInput,
+    operation: (scope: {
+      questionId: string;
+      eventId: string;
+      attendeeId: string;
+    }) => Promise<VoteOutcome | null>,
+  ): Promise<VoteResponse> {
+    const policy = await resolvePolicyForAttendee(this.policies, input.joinCode, input.attendee);
+
+    // Same ordering discipline as submission: the cheapest, most conclusive
+    // refusal first, and nothing consumed before the caller is known to be
+    // entitled to act.
+    if (policy.status !== 'PUBLISHED') throw new EventNotAcceptingQuestionsError(policy.status);
+    if (!policy.allowUpvotes) throw new VotingDisabledError();
+
+    const attendee = await this.attendees.findByIdForEvent(input.attendee.sub, policy.eventId);
+    if (!attendee) throw new AttendeeSessionRequiredError();
+    // Blocking covers voting too. A moderator who removed someone from the
+    // conversation did not intend for them to keep steering it.
+    if (attendee.isBlocked) throw new AttendeeBlockedError();
+
+    await this.enforceVoteLimit(attendee.id);
+
+    const outcome = await operation({
+      questionId: input.questionId,
+      // From the token, so a question on another event can never be reached
+      // by naming it — the repository scopes the row by this.
+      eventId: policy.eventId,
+      attendeeId: attendee.id,
+    });
+
+    // Absent, another event's, archived and not-yet-approved all collapse into
+    // one 404. Anything else would let a vote request confirm that a question
+    // the room cannot see exists.
+    if (!outcome) throw new QuestionNotFoundError();
+
+    return outcome;
+  }
+
+  private async enforceVoteLimit(attendeeId: string): Promise<void> {
+    const decision = await this.rateLimiter.consume(RATE_LIMIT_RULES.questionVote, attendeeId);
+    if (!decision.allowed) {
+      throw new RateLimitedError(
+        'You are voting very quickly. Please wait a moment.',
+        decision.retryAfterSeconds,
+      );
+    }
+  }
+}
+
+interface VoteInput {
+  joinCode: string;
+  questionId: string;
+  attendee: AttendeeTokenClaims;
+}
+
+/**
+ * Confirming a duplicate.
+ *
+ * The system only ever SUGGESTS; this is the human saying yes. The question in
+ * the path is the copy and is archived; the one in the body survives and
+ * absorbs the copy's votes exactly once.
+ *
+ * The invariants checked here are the ones the schema documents: no
+ * self-merge, no cycle. A cycle is prevented by refusing to merge into
+ * anything that has itself been merged away — a chain can then never be more
+ * than one link long, and a one-link chain cannot loop.
+ */
+@Injectable()
+export class MergeQuestionUseCase {
+  constructor(@Inject(QUESTION_REPOSITORY) private readonly questions: QuestionRepository) {}
+
+  async execute(
+    questionId: string,
+    request: MergeQuestionRequest,
+    context: RequestContext,
+  ): Promise<QuestionResponse> {
+    if (questionId === request.intoQuestionId) throw new CannotMergeIntoSelfError();
+
+    // Both org-scoped, and both 404 identically when absent or foreign — a
+    // merge must not be usable to discover another organization's ids.
+    const [duplicate, survivor] = await Promise.all([
+      this.questions.findByIdForOrg(questionId, context.orgId),
+      this.questions.findByIdForOrg(request.intoQuestionId, context.orgId),
+    ]);
+    if (!duplicate || !survivor) throw new QuestionNotFoundError();
+
+    if (duplicate.eventId !== survivor.eventId)
+      throw new InvalidMergeTargetError('different_event');
+    if (survivor.mergedIntoQuestionId) throw new InvalidMergeTargetError('merged');
+    if (!MERGE_TARGET_STATUSES.includes(survivor.status)) {
+      throw new InvalidMergeTargetError('not_live');
+    }
+
+    // The copy leaves the board through the same door everything else does:
+    // ARCHIVED, which the lifecycle must permit from its current state.
+    if (!canTransition(duplicate.status, 'ARCHIVED')) {
+      throw new InvalidQuestionTransitionError(duplicate.status, 'ARCHIVED');
+    }
+
+    return toQuestionResponse(
+      await this.questions.mergeQuestion({
+        questionId,
+        intoQuestionId: request.intoQuestionId,
+        orgId: context.orgId,
+        actorId: context.userId,
+      }),
+    );
+  }
+}
+
+/** Statuses a question must be in to absorb another. */
+const MERGE_TARGET_STATUSES: readonly QuestionStatus[] = ['PENDING', 'APPROVED', 'ANSWERED'];
+
+/**
+ * Dismissing a duplicate suggestion: the human saying no.
+ *
+ * Nothing about the question changes except that the suggestion stops being
+ * shown. It stays wherever it was in the queue, with whatever status it had —
+ * dismissing "looks like a duplicate" is not an approval.
+ */
+@Injectable()
+export class DismissDuplicateUseCase {
+  constructor(@Inject(QUESTION_REPOSITORY) private readonly questions: QuestionRepository) {}
+
+  async execute(questionId: string, context: RequestContext): Promise<QuestionResponse> {
+    const question = await this.questions.findByIdForOrg(questionId, context.orgId);
+    if (!question) throw new QuestionNotFoundError();
+
+    // Already clear: report the current state rather than failing. A second
+    // click from a stale dashboard should not be an error.
+    if (!question.possibleDuplicate) return toQuestionResponse(question);
+
+    return toQuestionResponse(
+      await this.questions.dismissDuplicate({
+        questionId,
+        orgId: context.orgId,
+        actorId: context.userId,
       }),
     );
   }

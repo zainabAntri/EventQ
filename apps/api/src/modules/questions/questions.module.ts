@@ -4,12 +4,15 @@ import { PublicQuestionsController } from './presentation/public-questions.contr
 import { QuestionsController } from './presentation/questions.controller';
 import { AttendeeGuard } from './presentation/attendee.guard';
 import {
+  DismissDuplicateUseCase,
   GetQuestionStatsUseCase,
   JoinEventUseCase,
   ListModerationQueueUseCase,
   ListPublicQuestionsUseCase,
+  MergeQuestionUseCase,
   ModerateQuestionUseCase,
   SubmitQuestionUseCase,
+  VoteOnQuestionUseCase,
 } from './application/question.use-cases';
 import {
   PrismaAttendeeRepository,
@@ -44,6 +47,9 @@ import { ATTENDEE_TOKENS } from './domain/attendee-tokens.port';
     ListModerationQueueUseCase,
     GetQuestionStatsUseCase,
     ModerateQuestionUseCase,
+    VoteOnQuestionUseCase,
+    MergeQuestionUseCase,
+    DismissDuplicateUseCase,
 
     // Presentation
     AttendeeGuard,

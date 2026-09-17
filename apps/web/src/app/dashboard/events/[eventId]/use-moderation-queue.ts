@@ -9,7 +9,13 @@ import type {
   QuestionStatus,
 } from '@eventq/contracts';
 import { ApiError } from '@/lib/api-client';
-import { getQuestionStats, listQuestions, moderateQuestion } from '@/lib/api-client/organizer';
+import {
+  dismissDuplicate as dismissDuplicateSuggestion,
+  getQuestionStats,
+  listQuestions,
+  mergeQuestion,
+  moderateQuestion,
+} from '@/lib/api-client/organizer';
 
 /**
  * The moderation queue's data layer.
@@ -84,6 +90,10 @@ export interface ModerationQueue {
   loadMore: () => void;
   refresh: () => void;
   moderate: (questionId: string, action: QuestionModerationAction) => Promise<void>;
+  /** Confirms a duplicate: the question is archived into intoQuestionId. */
+  mergeInto: (questionId: string, intoQuestionId: string) => Promise<void>;
+  /** Withdraws a duplicate suggestion without changing anything else. */
+  dismissDuplicate: (questionId: string) => Promise<void>;
 }
 
 export function useModerationQueue(eventId: string): ModerationQueue {
@@ -259,13 +269,18 @@ export function useModerationQueue(eventId: string): ModerationQueue {
       .finally(() => setIsLoadingMore(false));
   }, [cursor, eventId, filters, isLoadingMore, queryFor, handleFailure]);
 
-  const moderate = useCallback(
-    async (questionId: string, action: QuestionModerationAction): Promise<void> => {
+  /**
+   * Applies any moderator decision that returns the updated question, and
+   * folds the result into the list. Moderation, merge and dismiss all go
+   * through here, so "what happens to the card afterwards" is decided once.
+   */
+  const applyDecision = useCallback(
+    async (questionId: string, decide: () => Promise<QuestionResponse>): Promise<void> => {
       setPendingActionOn(questionId);
       setError(null);
 
       try {
-        const updated = await moderateQuestion(questionId, action);
+        const updated = await decide();
 
         setQuestions((current) => {
           /**
@@ -310,6 +325,30 @@ export function useModerationQueue(eventId: string): ModerationQueue {
     [eventId, filters.status, handleFailure],
   );
 
+  const moderate = useCallback(
+    (questionId: string, action: QuestionModerationAction): Promise<void> =>
+      applyDecision(questionId, () => moderateQuestion(questionId, action)),
+    [applyDecision],
+  );
+
+  /**
+   * Confirming a duplicate. The API returns the archived COPY, which then
+   * leaves every view except the archive tab — the same rule as archiving by
+   * hand. The survivor's new vote count shows on the next refresh; the change
+   * token moves, so the banner offers one.
+   */
+  const mergeInto = useCallback(
+    (questionId: string, intoQuestionId: string): Promise<void> =>
+      applyDecision(questionId, () => mergeQuestion(questionId, intoQuestionId)),
+    [applyDecision],
+  );
+
+  const dismissDuplicate = useCallback(
+    (questionId: string): Promise<void> =>
+      applyDecision(questionId, () => dismissDuplicateSuggestion(questionId)),
+    [applyDecision],
+  );
+
   return {
     questions,
     stats,
@@ -325,5 +364,7 @@ export function useModerationQueue(eventId: string): ModerationQueue {
     loadMore,
     refresh,
     moderate,
+    mergeInto,
+    dismissDuplicate,
   };
 }

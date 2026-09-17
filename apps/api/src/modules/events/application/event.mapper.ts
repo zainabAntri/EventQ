@@ -31,6 +31,7 @@ export function toEventResponse(record: EventRecord, webOrigin: string): EventRe
       moderationMode: record.settings.moderationMode,
       attendeeIdentityMode: record.settings.attendeeIdentityMode,
       isPubliclyListed: record.isPubliclyListed,
+      allowUpvotes: record.settings.allowUpvotes,
     },
     organizationId: record.orgId,
     publishedAt: record.publishedAt?.toISOString() ?? null,

@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import {
+  MergeQuestionRequest,
   ModerateQuestionRequest,
   ModerationQueueQuery,
   ModerationQueueResponse,
@@ -26,13 +27,16 @@ import {
 import { RequirePermissions } from '../../../shared/auth/auth.guard';
 import { Ctx, type RequestContext } from '../../../shared/auth/request-context';
 import {
+  DismissDuplicateUseCase,
   GetQuestionStatsUseCase,
   ListModerationQueueUseCase,
+  MergeQuestionUseCase,
   ModerateQuestionUseCase,
 } from '../application/question.use-cases';
 
 class ModerationQueueQueryDto extends createZodDto(ModerationQueueQuery) {}
 class ModerateQuestionDto extends createZodDto(ModerateQuestionRequest) {}
+class MergeQuestionDto extends createZodDto(MergeQuestionRequest) {}
 
 /**
  * Organizer moderation.
@@ -52,6 +56,8 @@ export class QuestionsController {
     private readonly listQueue: ListModerationQueueUseCase,
     private readonly stats: GetQuestionStatsUseCase,
     private readonly moderate: ModerateQuestionUseCase,
+    private readonly merge: MergeQuestionUseCase,
+    private readonly dismissDuplicate: DismissDuplicateUseCase,
   ) {}
 
   @Get('events/:eventId/questions')
@@ -107,5 +113,41 @@ export class QuestionsController {
     @Ctx() context: RequestContext,
   ): Promise<QuestionResponse> {
     return this.moderate.execute(questionId, body, context);
+  }
+
+  @Post('questions/:questionId/merge')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('question:moderate')
+  @ApiOperation({
+    summary: 'Merge a duplicate into another question',
+    description:
+      'Confirms that the question in the path repeats `intoQuestionId`. The copy is archived with a pointer to the survivor, and every attendee who supported the copy now supports the survivor — exactly once, even if they had voted for both. Refuses a self-merge, a target on another event, and a target that was itself merged away (which is what makes a cycle impossible). The system only ever SUGGESTS a duplicate; this is the human decision, and nothing is merged without it. Returns the archived copy.',
+  })
+  @ApiParam({ name: 'questionId', format: 'uuid' })
+  @ApiZodBody(MergeQuestionRequest)
+  @ApiZodResponse(200, QuestionResponse, 'Merged; the archived copy.')
+  mergeInto(
+    @Param('questionId', new ParseUUIDPipe({ version: '7' })) questionId: string,
+    @Body() body: MergeQuestionDto,
+    @Ctx() context: RequestContext,
+  ): Promise<QuestionResponse> {
+    return this.merge.execute(questionId, body, context);
+  }
+
+  @Post('questions/:questionId/dismiss-duplicate')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('question:moderate')
+  @ApiOperation({
+    summary: 'Dismiss a duplicate suggestion',
+    description:
+      '"No, these are different questions." Clears the suggestion and records the decision in the audit trail. Nothing else about the question changes — dismissing a suggestion is not an approval. Idempotent: a question with no suggestion is returned as it is.',
+  })
+  @ApiParam({ name: 'questionId', format: 'uuid' })
+  @ApiZodResponse(200, QuestionResponse, 'Suggestion cleared.')
+  dismiss(
+    @Param('questionId', new ParseUUIDPipe({ version: '7' })) questionId: string,
+    @Ctx() context: RequestContext,
+  ): Promise<QuestionResponse> {
+    return this.dismissDuplicate.execute(questionId, context);
   }
 }

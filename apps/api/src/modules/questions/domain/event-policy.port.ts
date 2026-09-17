@@ -27,6 +27,8 @@ export interface EventSubmissionPolicy {
   moderationMode: ModerationMode;
   attendeeIdentityMode: AttendeeIdentityMode;
   allowAnonymousPost: boolean;
+  /** Whether the room may upvote. Read on every vote, never trusted from the client. */
+  allowUpvotes: boolean;
 
   minQuestionLength: number;
   maxQuestionLength: number;

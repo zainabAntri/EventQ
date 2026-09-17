@@ -15,11 +15,21 @@ import { POLL_INTERVAL_MS } from './use-moderation-queue';
  * be worked at speed with Tab and Enter while a speaker is mid-sentence.
  */
 
-const { getEvent, listQuestions, getQuestionStats, moderateQuestion, replace } = vi.hoisted(() => ({
+const {
+  getEvent,
+  listQuestions,
+  getQuestionStats,
+  moderateQuestion,
+  mergeQuestion,
+  dismissDuplicate,
+  replace,
+} = vi.hoisted(() => ({
   getEvent: vi.fn(),
   listQuestions: vi.fn(),
   getQuestionStats: vi.fn(),
   moderateQuestion: vi.fn(),
+  mergeQuestion: vi.fn(),
+  dismissDuplicate: vi.fn(),
   replace: vi.fn(),
 }));
 
@@ -28,6 +38,8 @@ vi.mock('@/lib/api-client/organizer', () => ({
   listQuestions,
   getQuestionStats,
   moderateQuestion,
+  mergeQuestion,
+  dismissDuplicate,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -55,6 +67,7 @@ const EVENT = {
     moderationMode: 'PRE' as const,
     attendeeIdentityMode: 'OPTIONAL' as const,
     isPubliclyListed: false,
+    allowUpvotes: true,
   },
   organizationId: '01930000-0000-7000-8000-0000000000a1',
   publishedAt: '2026-06-01T09:00:00.000Z',
@@ -77,7 +90,8 @@ function question(overrides: Partial<QuestionResponse> = {}): QuestionResponse {
     isAnonymous: true,
     upvoteCount: 0,
     flags: [],
-    possibleDuplicateOfQuestionId: null,
+    possibleDuplicate: null,
+    mergedIntoQuestionId: null,
     createdAt: '2026-06-01T09:30:00.000Z',
     updatedAt: '2026-06-01T09:30:00.000Z',
     answeredAt: null,
@@ -336,6 +350,102 @@ describe('the actions on offer', () => {
     // search box, so the role alone matches more than one node.
     expect(await screen.findByText(/already archived/i)).toBeInTheDocument();
     expect(screen.getByText(/evaluate a founding team/i)).toBeInTheDocument();
+  });
+});
+
+describe('duplicate suggestions', () => {
+  const ORIGINAL = {
+    questionId: '01930000-0000-7000-8000-00000000aaaa',
+    body: 'How can I use AI in my company?',
+    status: 'APPROVED' as const,
+    upvoteCount: 4,
+    similarity: 0.67,
+  };
+
+  it('shows the original side by side, with how similar the system thought it was', async () => {
+    listQuestions.mockResolvedValue(
+      page([
+        question({
+          body: 'How can businesses use AI?',
+          flags: ['possible_duplicate'],
+          possibleDuplicate: ORIGINAL,
+        }),
+      ]),
+    );
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+
+    const panel = await screen.findByRole('complementary', { name: /possible duplicate/i });
+    expect(within(panel).getByText('How can I use AI in my company?')).toBeInTheDocument();
+    expect(within(panel).getByText(/67% similar/)).toBeInTheDocument();
+    expect(within(panel).getByText(/4 votes/)).toBeInTheDocument();
+    // Both decisions on offer, neither styled as the reflex click.
+    expect(
+      within(panel).getByRole('button', { name: /merge into that question/i }),
+    ).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: /not a duplicate/i })).toBeInTheDocument();
+  });
+
+  it('merges into the suggested original and drops the copy from the queue', async () => {
+    const copy = question({
+      body: 'How can businesses use AI?',
+      possibleDuplicate: ORIGINAL,
+    });
+    listQuestions.mockResolvedValue(page([copy]));
+    mergeQuestion.mockResolvedValue({
+      ...copy,
+      status: 'ARCHIVED',
+      possibleDuplicate: null,
+      mergedIntoQuestionId: ORIGINAL.questionId,
+      allowedActions: [],
+    });
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: /merge into that question/i }));
+
+    expect(mergeQuestion).toHaveBeenCalledWith(copy.id, ORIGINAL.questionId);
+    // Archived, so it leaves the Waiting tab like any other archive.
+    await waitFor(() =>
+      expect(screen.queryByText('How can businesses use AI?')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('dismisses the suggestion and leaves the question exactly where it was', async () => {
+    const copy = question({
+      body: 'How can I use Excel in my company?',
+      possibleDuplicate: ORIGINAL,
+    });
+    listQuestions.mockResolvedValue(page([copy]));
+    dismissDuplicate.mockResolvedValue({ ...copy, possibleDuplicate: null });
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: /not a duplicate/i }));
+
+    expect(dismissDuplicate).toHaveBeenCalledWith(copy.id);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('complementary', { name: /possible duplicate/i }),
+      ).not.toBeInTheDocument(),
+    );
+    // Still pending, still here, still approvable — dismissing is not approving.
+    expect(screen.getByText('How can I use Excel in my company?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+  });
+
+  it('explains why an archived question is in the archive when it was merged', async () => {
+    listQuestions.mockResolvedValue(
+      page([
+        question({
+          status: 'ARCHIVED',
+          allowedActions: [],
+          mergedIntoQuestionId: ORIGINAL.questionId,
+        }),
+      ]),
+    );
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+
+    expect(await screen.findByText(/merged into another question/i)).toBeInTheDocument();
   });
 });
 

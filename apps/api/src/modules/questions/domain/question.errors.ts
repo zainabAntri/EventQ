@@ -136,6 +136,49 @@ export class InvalidQuestionTransitionError extends InvariantViolationError {
 }
 
 /**
+ * The organizer switched voting off for this event.
+ *
+ * 422 rather than 403: the attendee is perfectly entitled to be here, it is the
+ * operation that the event does not offer. Safe to say plainly, because the
+ * board already hides its vote buttons when this is the case — only a
+ * hand-crafted request reaches it.
+ */
+export class VotingDisabledError extends InvariantViolationError {
+  constructor() {
+    super('VOTING_DISABLED', 'Voting is switched off for this event.');
+  }
+}
+
+/** A question cannot absorb itself. */
+export class CannotMergeIntoSelfError extends InvariantViolationError {
+  constructor() {
+    super('CANNOT_MERGE_INTO_SELF', 'A question cannot be merged into itself.');
+  }
+}
+
+/**
+ * The chosen survivor cannot take a merge.
+ *
+ * Covers a target that was itself merged away (which is how a chain, and
+ * therefore a cycle, is prevented), one that is archived, rejected or spam, and
+ * one on a different event. The reason is given, because a moderator picked
+ * this target deliberately and "no" without a why sends them guessing.
+ */
+export class InvalidMergeTargetError extends InvariantViolationError {
+  constructor(reason: 'merged' | 'not_live' | 'different_event') {
+    super(
+      'INVALID_MERGE_TARGET',
+      reason === 'merged'
+        ? 'That question has already been merged into another. Merge into the surviving question instead.'
+        : reason === 'different_event'
+          ? 'Questions can only be merged within the same event.'
+          : 'Only a question that is waiting, approved or answered can absorb another.',
+      { context: { reason } },
+    );
+  }
+}
+
+/**
  * No usable attendee token.
  *
  * Missing, expired, malformed and issued-for-a-different-event all produce this

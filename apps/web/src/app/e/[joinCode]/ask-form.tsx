@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ATTENDEE_NAME_MAX,
   countCharacters,
@@ -9,7 +9,8 @@ import {
 } from '@eventq/contracts';
 import { Alert, Button, FormField, Input, Label, Textarea } from '@/components/ui';
 import { ApiError } from '@/lib/api-client';
-import { joinEvent, submitQuestion } from '@/lib/api-client/public-events';
+import { submitQuestion } from '@/lib/api-client/public-events';
+import { useAttendeeSession } from './attendee-session';
 
 /**
  * The whole attendee experience: one textarea, one optional name, one button.
@@ -36,7 +37,10 @@ const FALLBACK_LIMITS: AttendeeSessionResponse['limits'] = {
 type Phase = 'writing' | 'submitting' | 'submitted';
 
 export function AskForm({ joinCode }: { joinCode: string }) {
-  const [session, setSession] = useState<AttendeeSessionResponse | null>(null);
+  // The identity is owned by the page, not the form: the board beneath needs
+  // the same one, and two components each joining on mount would race and
+  // mint two attendees. See attendee-session.tsx.
+  const { session, ensureSession, notifyQuestionSubmitted } = useAttendeeSession();
   const [body, setBody] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [phase, setPhase] = useState<Phase>('writing');
@@ -53,25 +57,6 @@ export function AskForm({ joinCode }: { joinCode: string }) {
    */
   const idempotencyKey = useRef<string>(crypto.randomUUID());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Minted in the background so it is ready by the time anyone has finished
-  // typing. A failure here is not surfaced: submitting retries the join, and
-  // an error about something the attendee never asked for is only noise.
-  useEffect(() => {
-    let cancelled = false;
-
-    joinEvent(joinCode)
-      .then((joined) => {
-        if (!cancelled) setSession(joined);
-      })
-      .catch(() => {
-        /* Retried on submit. */
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [joinCode]);
 
   const limits = session?.limits ?? FALLBACK_LIMITS;
   const identityMode = session?.identityMode ?? 'OPTIONAL';
@@ -99,7 +84,7 @@ export function AskForm({ joinCode }: { joinCode: string }) {
 
       try {
         // The background join may not have finished, or may have failed.
-        if (!session) setSession(await joinEvent(joinCode));
+        if (!session) await ensureSession();
 
         await submitQuestion(
           joinCode,
@@ -115,12 +100,15 @@ export function AskForm({ joinCode }: { joinCode: string }) {
         setBody('');
         // Only now is the key spent: a new question is a genuinely new request.
         idempotencyKey.current = crypto.randomUUID();
+        // The board below reloads so the attendee sees their question waiting
+        // straight away, rather than on its next poll.
+        notifyQuestionSubmitted();
       } catch (caught) {
         setPhase('writing');
         setError(messageFor(caught));
       }
     },
-    [body, displayName, joinCode, length, limits, session],
+    [body, displayName, ensureSession, joinCode, length, limits, notifyQuestionSubmitted, session],
   );
 
   if (phase === 'submitted') {

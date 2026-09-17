@@ -1,13 +1,16 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
   HttpStatus,
   Inject,
   Param,
+  ParseUUIDPipe,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -24,6 +27,7 @@ import {
   PublicQuestionListResponse,
   PublicQuestionResponse,
   SubmitQuestionRequest,
+  VoteResponse,
 } from '@eventq/contracts';
 import {
   ApiZodBody,
@@ -50,6 +54,7 @@ import {
   JoinEventUseCase,
   ListPublicQuestionsUseCase,
   SubmitQuestionUseCase,
+  VoteOnQuestionUseCase,
 } from '../application/question.use-cases';
 import { AttendeeCtx, AttendeeGuard, type AttendeeRequest } from './attendee.guard';
 import { setAttendeeCookie } from './attendee.cookies';
@@ -83,6 +88,7 @@ export class PublicQuestionsController {
     private readonly joinEvent: JoinEventUseCase,
     private readonly submitQuestion: SubmitQuestionUseCase,
     private readonly listQuestions: ListPublicQuestionsUseCase,
+    private readonly vote: VoteOnQuestionUseCase,
     private readonly config: AppConfigService,
     @Inject(RATE_LIMITER) private readonly rateLimiter: RateLimiter,
     @Inject(ATTENDEE_TOKENS) private readonly tokens: AttendeeTokens,
@@ -172,6 +178,54 @@ export class PublicQuestionsController {
     await this.enforceLimit(RATE_LIMIT_RULES.publicRead, clientIp(request));
 
     return this.listQuestions.execute({ joinCode: code, attendee, query });
+  }
+
+  @Put('questions/:questionId/vote')
+  @UseGuards(AttendeeGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Upvote a question',
+    description:
+      "Records this attendee's support for a question the room can see. IDEMPOTENT: repeating it returns the same state rather than an error, so a double-tap, a retry on dropped wifi and a page refresh are all harmless. The identity is the attendee token — never the IP address, which a whole venue shares — and one vote per identity per question is enforced by a database constraint. Returns 404 for any question the room cannot see, so an unpublished one cannot be discovered by voting on it.",
+  })
+  @ApiParam({ name: 'joinCode', example: 'EVENTQ26' })
+  @ApiParam({ name: 'questionId', format: 'uuid' })
+  @ApiZodResponse(200, VoteResponse, 'The vote as recorded.')
+  async upvote(
+    @Param('joinCode') joinCode: string,
+    @Param('questionId', new ParseUUIDPipe({ version: '7' })) questionId: string,
+    @AttendeeCtx() attendee: AttendeeTokenClaims,
+    @Req() request: Request,
+  ): Promise<VoteResponse> {
+    const code = parseJoinCode(joinCode);
+    // Loose per-IP layer; the per-attendee limit inside the use-case is the
+    // precise one. See RATE_LIMIT_RULES for why the two numbers differ so much.
+    await this.enforceLimit(RATE_LIMIT_RULES.questionVotePerIp, clientIp(request));
+
+    return this.vote.cast({ joinCode: code, questionId, attendee });
+  }
+
+  @Delete('questions/:questionId/vote')
+  @UseGuards(AttendeeGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Withdraw an upvote',
+    description:
+      'The inverse of PUT, with the same idempotency: withdrawing a vote that was never cast returns the current state rather than an error.',
+  })
+  @ApiParam({ name: 'joinCode', example: 'EVENTQ26' })
+  @ApiParam({ name: 'questionId', format: 'uuid' })
+  @ApiZodResponse(200, VoteResponse, 'The vote as recorded.')
+  async withdrawVote(
+    @Param('joinCode') joinCode: string,
+    @Param('questionId', new ParseUUIDPipe({ version: '7' })) questionId: string,
+    @AttendeeCtx() attendee: AttendeeTokenClaims,
+    @Req() request: Request,
+  ): Promise<VoteResponse> {
+    const code = parseJoinCode(joinCode);
+    await this.enforceLimit(RATE_LIMIT_RULES.questionVotePerIp, clientIp(request));
+
+    return this.vote.withdraw({ joinCode: code, questionId, attendee });
   }
 
   /**

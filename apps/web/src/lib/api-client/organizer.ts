@@ -127,3 +127,29 @@ export function moderateQuestion(
     schema: QuestionResponse,
   });
 }
+
+/**
+ * Confirms a duplicate.
+ *
+ * The question named first is the COPY and is archived; intoQuestionId is
+ * the survivor, which absorbs the copy's votes. This is the human decision the
+ * system's suggestion was waiting for — nothing is merged without it.
+ */
+export function mergeQuestion(
+  questionId: string,
+  intoQuestionId: string,
+): Promise<QuestionResponse> {
+  return apiRequest(`/questions/${encodeURIComponent(questionId)}/merge`, {
+    method: 'POST',
+    body: { intoQuestionId },
+    schema: QuestionResponse,
+  });
+}
+
+/** "No, these are different questions." Clears the suggestion, nothing else. */
+export function dismissDuplicate(questionId: string): Promise<QuestionResponse> {
+  return apiRequest(`/questions/${encodeURIComponent(questionId)}/dismiss-duplicate`, {
+    method: 'POST',
+    schema: QuestionResponse,
+  });
+}
