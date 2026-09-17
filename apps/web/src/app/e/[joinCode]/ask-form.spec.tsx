@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApiError } from '@/lib/api-client';
 import { AskForm } from './ask-form';
+import { AttendeeSessionProvider } from './attendee-session';
 
 /**
  * The attendee form.
@@ -34,6 +35,15 @@ const SESSION = {
 
 const VALID = 'How do you follow up after meeting someone at an event?';
 
+/** The form lives inside the page's session provider, which owns the join. */
+function renderForm() {
+  return render(
+    <AttendeeSessionProvider joinCode="EVENTQ26">
+      <AskForm joinCode="EVENTQ26" />
+    </AttendeeSessionProvider>,
+  );
+}
+
 function problem(code: string, status: number) {
   return new ApiError(
     {
@@ -57,13 +67,13 @@ describe('asking a question', () => {
   it('puts the cursor in the question box on arrival', async () => {
     // The single biggest contributor to the 15-second target: no tapping around
     // to find the field, the keyboard is already up.
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     expect(screen.getByLabelText(/your question/i)).toHaveFocus();
   });
 
   it('needs no account, and offers a name only as optional', async () => {
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
@@ -72,7 +82,7 @@ describe('asking a question', () => {
 
   it('submits a question and confirms it clearly', async () => {
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     await user.click(screen.getByRole('button', { name: /send question/i }));
@@ -86,7 +96,7 @@ describe('asking a question', () => {
 
   it('offers to ask another without reloading', async () => {
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     await user.click(screen.getByRole('button', { name: /send question/i }));
@@ -99,7 +109,7 @@ describe('asking a question', () => {
 
   it('sends the name when given, and marks the question anonymous when not', async () => {
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     await user.type(screen.getByLabelText(/your name/i), 'Priya Raman');
@@ -117,7 +127,7 @@ describe('asking a question', () => {
 describe('client-side validation', () => {
   it('refuses an empty question without troubling the server', async () => {
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.click(screen.getByRole('button', { name: /send question/i }));
 
@@ -130,7 +140,7 @@ describe('client-side validation', () => {
 
   it('refuses a too-short question and returns focus to the box', async () => {
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), 'short');
     await user.click(screen.getByRole('button', { name: /send question/i }));
@@ -143,7 +153,7 @@ describe('client-side validation', () => {
 
   it('counts down the characters remaining', async () => {
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), 'hello');
 
@@ -151,7 +161,7 @@ describe('client-side validation', () => {
   });
 
   it('cannot be typed past the hard ceiling', async () => {
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     // A paste of an entire document is stopped by the browser itself, so it is
     // never sent at all. The real limit is still enforced server-side.
@@ -162,7 +172,7 @@ describe('client-side validation', () => {
 describe('hostile and unusual input', () => {
   it('sends HTML through as ordinary text rather than mangling it', async () => {
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     const html = 'Is <b>bold</b> allowed in a question here?';
     await user.type(screen.getByLabelText(/your question/i), html);
@@ -190,7 +200,7 @@ describe('hostile and unusual input', () => {
     );
 
     const user = userEvent.setup();
-    const { container } = render(<AskForm joinCode="EVENTQ26" />);
+    const { container } = renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     await user.click(screen.getByRole('button', { name: /send question/i }));
@@ -205,7 +215,7 @@ describe('failure and retry', () => {
     submitQuestion.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     await user.click(screen.getByRole('button', { name: /send question/i }));
@@ -222,7 +232,7 @@ describe('failure and retry', () => {
     submitQuestion.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     await user.click(screen.getByRole('button', { name: /send question/i }));
@@ -236,7 +246,7 @@ describe('failure and retry', () => {
 
   it('uses a NEW key for a genuinely new question', async () => {
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     await user.click(screen.getByRole('button', { name: /send question/i }));
@@ -258,7 +268,7 @@ describe('failure and retry', () => {
     submitQuestion.mockRejectedValueOnce(problem(code, status));
 
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     await user.click(screen.getByRole('button', { name: /send question/i }));
@@ -272,7 +282,7 @@ describe('failure and retry', () => {
     joinEvent.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     await user.click(screen.getByRole('button', { name: /send question/i }));
@@ -285,7 +295,7 @@ describe('failure and retry', () => {
     submitQuestion.mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
 
     const user = userEvent.setup();
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     await user.type(screen.getByLabelText(/your question/i), VALID);
     const button = screen.getByRole('button', { name: /send question/i });
@@ -301,13 +311,13 @@ describe('failure and retry', () => {
 
 describe('accessibility', () => {
   it('has no serious violations', async () => {
-    const { container } = render(<AskForm joinCode="EVENTQ26" />);
+    const { container } = renderForm();
 
     await expect(container).toHaveNoSeriousA11yViolations();
   });
 
   it('associates every control with a visible label', async () => {
-    render(<AskForm joinCode="EVENTQ26" />);
+    renderForm();
 
     expect(screen.getByLabelText(/your question/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/your name/i)).toBeInTheDocument();

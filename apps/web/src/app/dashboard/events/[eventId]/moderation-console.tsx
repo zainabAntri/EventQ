@@ -318,6 +318,8 @@ function QuestionList({ queue }: { queue: ReturnType<typeof useModerationQueue> 
             question={question}
             isBusy={queue.pendingActionOn === question.id}
             onModerate={(id, action) => void queue.moderate(id, action)}
+            onMerge={(id, into) => void queue.mergeInto(id, into)}
+            onDismissDuplicate={(id) => void queue.dismissDuplicate(id)}
           />
         ))}
       </ul>

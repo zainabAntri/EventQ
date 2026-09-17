@@ -2,6 +2,7 @@
 
 import {
   explainRankScore,
+  type DuplicateSuggestion,
   type QuestionModerationAction,
   type QuestionResponse,
   type QuestionStatus,
@@ -87,10 +88,21 @@ export interface QuestionCardProps {
   question: QuestionResponse;
   isBusy: boolean;
   onModerate: (questionId: string, action: QuestionModerationAction) => void;
+  /** Confirm a duplicate: fold this question into the suggested original. */
+  onMerge: (questionId: string, intoQuestionId: string) => void;
+  /** "No, these are different questions." */
+  onDismissDuplicate: (questionId: string) => void;
 }
 
-export function QuestionCard({ question, isBusy, onModerate }: QuestionCardProps) {
+export function QuestionCard({
+  question,
+  isBusy,
+  onModerate,
+  onMerge,
+  onDismissDuplicate,
+}: QuestionCardProps) {
   const submitted = new Date(question.createdAt);
+  const suggestion = question.possibleDuplicate;
 
   return (
     <li
@@ -168,6 +180,21 @@ export function QuestionCard({ question, isBusy, onModerate }: QuestionCardProps
         </ul>
       ) : null}
 
+      {suggestion ? (
+        <DuplicatePanel
+          suggestion={suggestion}
+          isBusy={isBusy}
+          onMerge={() => onMerge(question.id, suggestion.questionId)}
+          onDismiss={() => onDismissDuplicate(question.id)}
+        />
+      ) : null}
+
+      {question.mergedIntoQuestionId ? (
+        <p className="mt-3 text-xs text-[var(--muted)]">
+          Merged into another question. Its votes now count towards that one.
+        </p>
+      ) : null}
+
       <RankExplanation question={question} />
 
       {question.allowedActions.length > 0 ? (
@@ -187,6 +214,72 @@ export function QuestionCard({ question, isBusy, onModerate }: QuestionCardProps
         </div>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * The system thinks this question repeats an earlier one.
+ *
+ * Shown as a SUGGESTION with the original's text alongside, because the
+ * decision is the moderator's and they cannot make it from an id. Two buttons,
+ * neither styled as the obvious click: merging archives an attendee's question,
+ * and dismissing releases one the system had doubts about. Both deserve a
+ * moment's thought, and a primary-coloured "Merge" would get pressed by reflex.
+ *
+ * The similarity is shown as a percentage so a 95% and a 62% read differently
+ * — the detector is deliberately generous, and a moderator who knows that
+ * treats a low score as "have a look" rather than "the machine is sure".
+ */
+function DuplicatePanel({
+  suggestion,
+  isBusy,
+  onMerge,
+  onDismiss,
+}: {
+  suggestion: DuplicateSuggestion;
+  isBusy: boolean;
+  onMerge: () => void;
+  onDismiss: () => void;
+}) {
+  const percent = Math.round(suggestion.similarity * 100);
+
+  return (
+    <aside
+      aria-label="Possible duplicate"
+      className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm"
+    >
+      <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+        Possible duplicate · {percent}% similar to a {STATUS_LABEL[suggestion.status].toLowerCase()}{' '}
+        question with {suggestion.upvoteCount} {suggestion.upvoteCount === 1 ? 'vote' : 'votes'}
+      </p>
+
+      {/* The original, as TEXT. React escapes it. */}
+      <blockquote className="mt-1.5 border-l-2 border-amber-500/40 pl-2 leading-relaxed break-words whitespace-pre-wrap">
+        {suggestion.body}
+      </blockquote>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          isLoading={isBusy}
+          loadingLabel="Merging"
+          onClick={onMerge}
+          title="Archive this question and move its votes onto the original"
+        >
+          Merge into that question
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          isLoading={isBusy}
+          loadingLabel="Dismissing"
+          onClick={onDismiss}
+        >
+          Not a duplicate
+        </Button>
+      </div>
+    </aside>
   );
 }
 

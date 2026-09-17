@@ -52,6 +52,18 @@ Indexes that matter: `(eventId, status, rankScore DESC)` for the live board, `(e
 
 `upvoteCount` and `rankScore` are denormalised and maintained in-transaction; ranking is computed in SQL, never by loading rows into the application.
 
+### Voting: who is "one person" without an account?
+
+A vote is attached to the attendee token — a signed, event-scoped identity in an httpOnly cookie — and never to an IP address, because a venue shares one NAT address between hundreds of legitimate people. Four layers, each covering another's blind spot: the **signature** (a vote cannot be cast for an identity we never issued), the **unique index** on `(questionId, attendeeId)` (one vote per identity, decided by Postgres), a **per-attendee** rate limit (30 changes/min — the precise layer), and a deliberately **loose per-IP** limit (1200/min — bounds a script minting fresh identities without throttling a room told to "vote now"). Vote and unvote are `PUT`/`DELETE` and idempotent: a double-tap, a retry on dropped wifi and a page refresh all yield the same state as one honest vote. A `FOR UPDATE` row lock serialises concurrent votes on one question so the denormalised count can never drift from the rows; an integration test asserts this under ten genuinely concurrent requests.
+
+**The accepted limit, stated plainly:** a device that clears its cookie is a new attendee and may vote again. Closing that without accounts would require browser fingerprinting, which is the cross-device tracking this product promises not to do. It is contained instead: joining is rate limited per IP, and votes enter the ranking as `log10(votes + 1)`, so a hundred manufactured votes buy about four points — two hours of recency. Manipulation is possible, expensive and nearly worthless. A test named `KNOWN LIMIT` documents it.
+
+### Duplicate questions: suggest, never decide
+
+Detection is deterministic and free. Postgres recalls the ten nearest live questions by character trigram (a low bar, 0.2, so a reworded question makes the list at all); the domain then scores each on the max of trigram similarity and content-word overlap — stopwords removed, plurals folded, Dice coefficient — and suggests the best above 0.6. That is what catches "How can businesses use AI?" against "How can I use AI in my company?", which trigrams alone score around 0.3. The suggestion lives on the question row (`possibleDuplicateOfQuestionId`, `duplicateSimilarity`), holds the newer question for a moderator, and does nothing else: a **merge** archives the copy into the survivor and moves its votes exactly once; a **dismiss** clears the suggestion and leaves the question where it was. Both append to the audit trail. Merging into a question that has itself been merged is refused, which is what makes a cycle impossible.
+
+The known false positive — one changed noun, as in "…use Excel in my company?" — is kept visible by a test rather than tuned away. Word overlap cannot see meaning; that boundary is exactly where a semantic model would earn its cost, and it stays off until an organizer switches AI on for their event.
+
 ## 7. API boundaries
 
 Three surfaces with different auth and different threat models — a security boundary, not organisational tidiness:

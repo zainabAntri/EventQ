@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import { ApiError } from '@/lib/api-client';
 import { getPublicEvent } from '@/lib/api-client/public-events';
 import { AskForm } from './ask-form';
+import { AttendeeSessionProvider } from './attendee-session';
+import { QuestionBoard } from './question-board';
 
 /**
  * The page an attendee lands on after scanning the QR code.
@@ -55,11 +57,17 @@ export default async function AttendeeEventPage({
         </p>
       ) : null}
 
-      <AskForm joinCode={event.joinCode} />
+      {/* One identity for the whole page. The form and the board both need
+          it, and each joining on its own would mint two attendees. */}
+      <AttendeeSessionProvider joinCode={event.joinCode}>
+        <AskForm joinCode={event.joinCode} />
 
-      <p className="mt-8 text-xs text-[var(--color-muted,#666)]">
-        No account needed. Your question is sent anonymously unless you add your name.
-      </p>
+        <p className="mt-8 text-xs text-[var(--color-muted,#666)]">
+          No account needed. Your question is sent anonymously unless you add your name.
+        </p>
+
+        <QuestionBoard joinCode={event.joinCode} />
+      </AttendeeSessionProvider>
     </main>
   );
 }
