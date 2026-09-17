@@ -48,6 +48,14 @@ const PLACEHOLDER_ENV: Readonly<Record<string, string>> = {
   S3_BUCKET: 'test-bucket',
   S3_ACCESS_KEY_ID: 'test-key',
   S3_SECRET_ACCESS_KEY: 'test-secret',
+
+  // AI is ON for the suite so the AI endpoints can be exercised at all, but
+  // the key is a placeholder and is never sent anywhere: app.harness.ts
+  // replaces the provider with a scripted fake, and the Anthropic adapter is
+  // constructed but never called. Turning it on here is what lets the tests
+  // prove the per-EVENT switch refuses on its own.
+  AI_ENABLED: 'true',
+  ANTHROPIC_API_KEY: 'test-placeholder-key-never-sent',
 };
 
 for (const [key, value] of Object.entries(PLACEHOLDER_ENV)) {

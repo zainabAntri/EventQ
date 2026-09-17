@@ -1,13 +1,22 @@
 import { z } from 'zod';
 import {
+  AiStatusResponse,
   AuthSessionResponse,
+  CategorizeResponse,
+  ClusterResponse,
   EventListResponse,
   EventResponse,
+  EventSummaryResponse,
+  LatestSummaryResponse,
+  SimilarQuestionsResponse,
+  SuggestedAnswerResponse,
+  TopicResponse,
   ModerationQueueResponse,
   QuestionResponse,
   QuestionStatsResponse,
   type LoginRequest,
   type ModerationQueueQuery,
+  type UpdateEventRequest,
   type QuestionModerationAction,
 } from '@eventq/contracts';
 import { apiRequest } from './index';
@@ -151,5 +160,79 @@ export function dismissDuplicate(questionId: string): Promise<QuestionResponse> 
   return apiRequest(`/questions/${encodeURIComponent(questionId)}/dismiss-duplicate`, {
     method: 'POST',
     schema: QuestionResponse,
+  });
+}
+
+/** Partial update. Used by the AI panel for the per-event switch. */
+export function updateEvent(eventId: string, body: UpdateEventRequest): Promise<EventResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}`, {
+    method: 'PATCH',
+    body,
+    schema: EventResponse,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// AI. Every POST below is a deliberate click that may cost money; the panel
+// shows the spend and the cap before offering any of them. Every result is a
+// SUGGESTION — nothing here changes a status or publishes anything.
+// ---------------------------------------------------------------------------
+
+export function getAiStatus(eventId: string, signal?: AbortSignal): Promise<AiStatusResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/ai/status`, {
+    schema: AiStatusResponse,
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function runCategorize(eventId: string): Promise<CategorizeResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/ai/categorize`, {
+    method: 'POST',
+    schema: CategorizeResponse,
+  });
+}
+
+export function runCluster(eventId: string): Promise<ClusterResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/ai/cluster`, {
+    method: 'POST',
+    schema: ClusterResponse,
+  });
+}
+
+export function listTopics(eventId: string, signal?: AbortSignal): Promise<TopicResponse[]> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/ai/topics`, {
+    schema: z.array(TopicResponse),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function runSummary(eventId: string): Promise<EventSummaryResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/ai/summary`, {
+    method: 'POST',
+    schema: EventSummaryResponse,
+  });
+}
+
+export function getLatestSummary(
+  eventId: string,
+  signal?: AbortSignal,
+): Promise<LatestSummaryResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/ai/summary`, {
+    schema: LatestSummaryResponse,
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function runFindSimilar(questionId: string): Promise<SimilarQuestionsResponse> {
+  return apiRequest(`/questions/${encodeURIComponent(questionId)}/ai/similar`, {
+    method: 'POST',
+    schema: SimilarQuestionsResponse,
+  });
+}
+
+export function runSuggestAnswer(questionId: string): Promise<SuggestedAnswerResponse> {
+  return apiRequest(`/questions/${encodeURIComponent(questionId)}/ai/suggest-answer`, {
+    method: 'POST',
+    schema: SuggestedAnswerResponse,
   });
 }

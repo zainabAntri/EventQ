@@ -5,6 +5,7 @@ import {
   CategorizeResponse,
   ClusterResponse,
   EventSummaryResponse,
+  LatestSummaryResponse,
   SimilarQuestionsResponse,
   SuggestedAnswerResponse,
   TopicResponse,
@@ -173,11 +174,11 @@ export class AiController {
     description: 'Null when none has been generated.',
   })
   @ApiParam({ name: 'eventId', format: 'uuid' })
-  @ApiZodResponse(200, EventSummaryResponse.nullable(), 'The latest summary, or null.')
+  @ApiZodResponse(200, LatestSummaryResponse, 'The latest summary, or null.')
   getSummary(
     @Param('eventId', new ParseUUIDPipe({ version: '7' })) eventId: string,
     @Ctx() context: RequestContext,
-  ): Promise<EventSummaryResponse | null> {
+  ): Promise<LatestSummaryResponse> {
     return this.latestSummary.execute(eventId, context);
   }
 }

@@ -5,6 +5,7 @@ import {
   type CategorizeResponse,
   type ClusterResponse,
   type EventSummaryResponse,
+  type LatestSummaryResponse,
   type SimilarQuestionsResponse,
   type SuggestedAnswerResponse,
   type TopicResponse,
@@ -322,16 +323,16 @@ export class SummarizeEventUseCase {
 export class GetLatestSummaryUseCase {
   constructor(@Inject(AI_REPOSITORY) private readonly repository: AiRepository) {}
 
-  async execute(eventId: string, context: RequestContext): Promise<EventSummaryResponse | null> {
+  async execute(eventId: string, context: RequestContext): Promise<LatestSummaryResponse> {
     const event = await requireEvent(this.repository, eventId, context);
     const stored = await this.repository.findLatestSummary(event.eventId);
-    if (!stored) return null;
+    if (!stored) return { summary: null };
 
     // A stored blob is data, not something to trust: it is validated on the
     // way out, and a row written by an older shape reads as "no summary"
     // rather than crashing the panel.
     const content = readStoredSummary(stored.content);
-    return content ? toSummaryResponse(stored, content, null) : null;
+    return { summary: content ? toSummaryResponse(stored, content, null) : null };
   }
 }
 

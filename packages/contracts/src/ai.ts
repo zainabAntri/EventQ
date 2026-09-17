@@ -176,3 +176,11 @@ export const EventSummaryResponse = z.object({
   usage: AiUsageSummary.nullable(),
 });
 export type EventSummaryResponse = z.infer<typeof EventSummaryResponse>;
+
+/**
+ * The latest summary, wrapped. A bare null cannot travel as a JSON body
+ * (Express sends nothing, and the client sees an empty object), so the
+ * absence is a field rather than a missing document.
+ */
+export const LatestSummaryResponse = z.object({ summary: EventSummaryResponse.nullable() });
+export type LatestSummaryResponse = z.infer<typeof LatestSummaryResponse>;

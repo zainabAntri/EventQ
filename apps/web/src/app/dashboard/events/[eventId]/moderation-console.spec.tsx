@@ -22,6 +22,11 @@ const {
   moderateQuestion,
   mergeQuestion,
   dismissDuplicate,
+  getAiStatus,
+  listTopics,
+  getLatestSummary,
+  runSuggestAnswer,
+  runFindSimilar,
   replace,
 } = vi.hoisted(() => ({
   getEvent: vi.fn(),
@@ -30,6 +35,11 @@ const {
   moderateQuestion: vi.fn(),
   mergeQuestion: vi.fn(),
   dismissDuplicate: vi.fn(),
+  getAiStatus: vi.fn(),
+  listTopics: vi.fn(),
+  getLatestSummary: vi.fn(),
+  runSuggestAnswer: vi.fn(),
+  runFindSimilar: vi.fn(),
   replace: vi.fn(),
 }));
 
@@ -40,6 +50,15 @@ vi.mock('@/lib/api-client/organizer', () => ({
   moderateQuestion,
   mergeQuestion,
   dismissDuplicate,
+  getAiStatus,
+  listTopics,
+  getLatestSummary,
+  runSuggestAnswer,
+  runFindSimilar,
+  runCategorize: vi.fn(),
+  runCluster: vi.fn(),
+  runSummary: vi.fn(),
+  updateEvent: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -126,12 +145,26 @@ function page(items: QuestionResponse[], hasMore = false) {
   return { items, nextCursor: hasMore ? 'cursor-2' : null, hasMore };
 }
 
+const AI_OFF = {
+  availableOnServer: false,
+  enabledForEvent: false,
+  eventSpendMicros: 0,
+  eventBudgetMicros: 2_000_000,
+  monthlySpendMicros: 0,
+  monthlyBudgetMicros: 50_000_000,
+  callsByFeature: {},
+  models: {},
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   nextId = 0;
   getEvent.mockResolvedValue(EVENT);
   listQuestions.mockResolvedValue(page([question()]));
   getQuestionStats.mockResolvedValue(stats());
+  getAiStatus.mockResolvedValue(AI_OFF);
+  listTopics.mockResolvedValue([]);
+  getLatestSummary.mockResolvedValue({ summary: null });
 });
 
 afterEach(() => {
@@ -449,6 +482,108 @@ describe('duplicate suggestions', () => {
     render(<ModerationConsole eventId={EVENT_ID} />);
 
     expect(await screen.findByText(/merged into another question/i)).toBeInTheDocument();
+  });
+});
+
+describe('AI on the card', () => {
+  const DRAFT = {
+    draft: 'Start with one narrow, measurable process.',
+    caveats: ['I do not know your industry.'],
+    modelId: 'claude-sonnet-5',
+    generatedAt: '2026-09-18T10:00:00.000Z',
+  };
+
+  it('shows a stored draft labelled as AI-generated, with its caveats, and no publish button', async () => {
+    listQuestions.mockResolvedValue(page([question({ aiSuggestedAnswer: DRAFT })]));
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+
+    const block = await screen.findByRole('complementary', { name: /ai-drafted answer/i });
+    expect(within(block).getByText(/AI-generated draft/)).toBeInTheDocument();
+    expect(within(block).getByText(/not shown to attendees/)).toBeInTheDocument();
+    expect(
+      within(block).getByText('Start with one narrow, measurable process.'),
+    ).toBeInTheDocument();
+    expect(within(block).getByText('I do not know your industry.')).toBeInTheDocument();
+    expect(within(block).queryByRole('button', { name: /publish/i })).not.toBeInTheDocument();
+  });
+
+  it('labels the category and topic chips as AI-produced', async () => {
+    listQuestions.mockResolvedValue(
+      page([
+        question({
+          category: 'AI',
+          topic: { id: '01930000-0000-7000-8000-00000000cccc', label: 'AI adoption' },
+        }),
+      ]),
+    );
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+
+    expect(await screen.findByText(/AI-suggested category/)).toBeInTheDocument();
+    expect(screen.getByText(/AI-grouped topic/)).toBeInTheDocument();
+    expect(screen.getByText('AI adoption')).toBeInTheDocument();
+  });
+
+  it('offers no AI buttons while AI is off for the event', async () => {
+    render(<ModerationConsole eventId={EVENT_ID} />);
+
+    await screen.findByRole('button', { name: 'Approve' });
+    expect(
+      screen.queryByRole('button', { name: /draft an answer with ai/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /duplicate with ai/i })).not.toBeInTheDocument();
+  });
+
+  it('drafts an answer on request and shows it on the card', async () => {
+    getEvent.mockResolvedValue({ ...EVENT, settings: { ...EVENT.settings, aiEnabled: true } });
+    const pending = question();
+    listQuestions.mockResolvedValue(page([pending]));
+    runSuggestAnswer.mockResolvedValue({
+      questionId: pending.id,
+      ...DRAFT,
+      usage: {
+        modelId: 'claude-sonnet-5',
+        inputTokens: 1,
+        outputTokens: 1,
+        costMicros: 10,
+        cached: false,
+      },
+    });
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: /draft an answer with ai/i }));
+
+    expect(runSuggestAnswer).toHaveBeenCalledWith(pending.id);
+    expect(
+      await screen.findByText('Start with one narrow, measurable process.'),
+    ).toBeInTheDocument();
+    // Still pending, still approvable: a draft changes nothing about the question.
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+  });
+
+  it('reports a provider failure without losing the question', async () => {
+    getEvent.mockResolvedValue({ ...EVENT, settings: { ...EVENT.settings, aiEnabled: true } });
+    runSuggestAnswer.mockRejectedValue(
+      new ApiError(
+        {
+          type: 'https://docs.eventq.io/errors/ai_provider_error',
+          title: 'Service Unavailable',
+          status: 503,
+          code: 'AI_PROVIDER_ERROR',
+          detail:
+            'The AI provider took too long to answer. Nothing was changed; try again in a moment.',
+          traceId: 't',
+        },
+        503,
+      ),
+    );
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: /draft an answer with ai/i }));
+
+    expect(await screen.findByText(/took too long/)).toBeInTheDocument();
+    expect(screen.getByText(/How do you evaluate a founding team/)).toBeInTheDocument();
   });
 });
 
