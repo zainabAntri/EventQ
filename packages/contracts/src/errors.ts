@@ -36,13 +36,24 @@ export const ErrorCode = z.enum([
   'QUESTION_TOO_SHORT',
   /** This attendee already asked this exact question on this event. */
   'DUPLICATE_QUESTION',
+  /**
+   * Reserved and deliberately UNUSED. Voting is idempotent — repeating a vote
+   * returns the state it already produced rather than an error — because a
+   * retry on venue wifi and a deliberate repeat are indistinguishable, and
+   * refusing the honest one would be worse than tolerating the other.
+   */
   'DUPLICATE_VOTE',
+  /** The organizer switched voting off for this event. */
+  'VOTING_DISABLED',
   'EDIT_WINDOW_CLOSED',
   'ATTENDEE_BLOCKED',
   'IDENTITY_REQUIRED',
   'SUBMISSION_LIMIT_REACHED',
   'INVALID_QUESTION_TRANSITION',
   'CANNOT_MERGE_INTO_SELF',
+  /** The survivor is not a question another can be merged into: it is itself
+   *  merged away, archived, or belongs to a different event. */
+  'INVALID_MERGE_TARGET',
 
   // AI — never fatal to a request; surfaced for observability
   'AI_DISABLED',

@@ -89,6 +89,9 @@ export const AttendeeSessionResponse = z.object({
   displayName: z.string().nullable(),
   identityMode: AttendeeIdentityMode,
   moderationMode: ModerationMode,
+  /** Whether the organizer allows voting. The board hides its vote buttons
+   *  when false; the server refuses the vote regardless. */
+  allowUpvotes: z.boolean(),
   limits: z.object({
     minQuestionLength: z.number().int().nonnegative(),
     maxQuestionLength: z.number().int().positive(),
@@ -123,12 +126,37 @@ export const PublicQuestionResponse = z.object({
   upvoteCount: z.number().int().nonnegative(),
   /** True for the caller's own question, so the UI can label it "yours". */
   isMine: z.boolean(),
+  /**
+   * Whether THIS attendee has voted for it.
+   *
+   * Sent with every list so the board renders the right state after a page
+   * refresh without a second request — and so a refresh cannot be used to
+   * "forget" a vote and cast it again: the server remembers either way.
+   */
+  hasVoted: z.boolean(),
   createdAt: z.iso.datetime(),
 });
 export type PublicQuestionResponse = z.infer<typeof PublicQuestionResponse>;
 
 export const PublicQuestionListResponse = pageOf(PublicQuestionResponse);
 export type PublicQuestionListResponse = z.infer<typeof PublicQuestionListResponse>;
+
+/**
+ * The state of one attendee's vote on one question, after a vote or unvote.
+ *
+ * Both endpoints return this same shape and both are IDEMPOTENT: `PUT …/vote`
+ * means "make sure my vote exists" and `DELETE …/vote` means "make sure it
+ * does not". Sending either twice is harmless and yields the same response,
+ * which is what makes a double-tap, a retry on dropped wifi and a page refresh
+ * all safe. There is no request body — the identity comes from the attendee
+ * token and the question from the URL, and nothing else is the client's to say.
+ */
+export const VoteResponse = z.object({
+  questionId: EntityId,
+  upvoteCount: z.number().int().nonnegative(),
+  hasVoted: z.boolean(),
+});
+export type VoteResponse = z.infer<typeof VoteResponse>;
 
 /**
  * Moderation is expressed as an ACTION, never as a target status.
@@ -150,6 +178,37 @@ export const QuestionModerationAction = z.enum([
 export type QuestionModerationAction = z.infer<typeof QuestionModerationAction>;
 
 /**
+ * What the system found when it thought a question repeated an earlier one.
+ *
+ * `similarity` is 0–1 and is the max of two deterministic measures — character
+ * trigrams and content-word overlap — computed at ZERO API cost. It is shown so
+ * a moderator can weigh a 0.95 differently from a 0.62; a flat flag would make
+ * every suggestion look equally confident, and they are not.
+ */
+export const DuplicateSuggestion = z.object({
+  questionId: EntityId,
+  body: z.string(),
+  status: QuestionStatus,
+  upvoteCount: z.number().int().nonnegative(),
+  similarity: z.number().min(0).max(1),
+});
+export type DuplicateSuggestion = z.infer<typeof DuplicateSuggestion>;
+
+/**
+ * Confirming a duplicate: "this question repeats THAT one, fold it in".
+ *
+ * The question in the URL is the copy; `intoQuestionId` is the survivor. Sent
+ * explicitly rather than taken from the stored suggestion, so a moderator can
+ * merge into a question the system did not suggest — and so the server can
+ * refuse a target that has itself been merged away, which is what prevents a
+ * chain or a cycle from ever forming.
+ */
+export const MergeQuestionRequest = z.object({
+  intoQuestionId: EntityId,
+});
+export type MergeQuestionRequest = z.infer<typeof MergeQuestionRequest>;
+
+/**
  * A question as a moderator sees it.
  *
  * Carries `flags` — the reasons the system routed this question to review or
@@ -166,8 +225,21 @@ export const QuestionResponse = z.object({
   upvoteCount: z.number().int().nonnegative(),
   /** Signal names from the spam heuristics, empty for a clean submission. */
   flags: z.array(z.string()),
-  /** Set when the text closely resembles an existing question on this event. */
-  possibleDuplicateOfQuestionId: EntityId.nullable(),
+  /**
+   * The question this one may be repeating, when the system found one.
+   *
+   * A SUGGESTION, not a decision: nothing is hidden, merged or deleted on the
+   * strength of it. A moderator either confirms it (merge) or dismisses it, and
+   * either way it stops being reported here. Carries the original's text so the
+   * two can be compared on one card, without a second request per suggestion.
+   */
+  possibleDuplicate: DuplicateSuggestion.nullable(),
+  /**
+   * Set once a moderator confirmed this question repeats another. The question
+   * is archived at that moment, so this is only ever seen on the archive tab —
+   * where it explains WHY the question is there.
+   */
+  mergedIntoQuestionId: EntityId.nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   answeredAt: z.iso.datetime().nullable(),

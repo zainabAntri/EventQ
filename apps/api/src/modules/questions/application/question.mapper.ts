@@ -12,6 +12,7 @@ import type {
 } from '../domain/question.repository';
 import type { EventSubmissionPolicy } from '../domain/event-policy.port';
 import { allowedActionsFor, statusVisibleToAuthor } from '../domain/question-lifecycle';
+import { DUPLICATE_SUGGESTION_THRESHOLD } from '../domain/question-similarity';
 
 /**
  * Record -> contract.
@@ -38,7 +39,7 @@ import { allowedActionsFor, statusVisibleToAuthor } from '../domain/question-lif
  *    reported to its own author as PENDING and never as SPAM.
  */
 export function toPublicQuestionResponse(
-  record: QuestionRecord & { isMine: boolean },
+  record: QuestionRecord & { isMine: boolean; hasVoted: boolean },
   policy: Pick<EventSubmissionPolicy, 'attendeeIdentityMode'>,
 ): PublicQuestionResponse {
   const anonymous = record.isAnonymous || policy.attendeeIdentityMode === 'ANONYMOUS';
@@ -51,6 +52,7 @@ export function toPublicQuestionResponse(
     isAnonymous: anonymous,
     upvoteCount: record.upvoteCount,
     isMine: record.isMine,
+    hasVoted: record.hasVoted,
     createdAt: record.createdAt.toISOString(),
   };
 }
@@ -75,7 +77,19 @@ export function toQuestionResponse(record: ModeratedQuestionRecord): QuestionRes
     isAnonymous: record.isAnonymous,
     upvoteCount: record.upvoteCount,
     flags: record.flags,
-    possibleDuplicateOfQuestionId: record.possibleDuplicateOfQuestionId,
+    possibleDuplicate: record.possibleDuplicate
+      ? {
+          questionId: record.possibleDuplicate.questionId,
+          body: record.possibleDuplicate.body,
+          status: record.possibleDuplicate.status,
+          upvoteCount: record.possibleDuplicate.upvoteCount,
+          // A suggestion raised before scores were recorded carries none. It
+          // is reported at the threshold — "just similar enough to ask" — which
+          // is exactly what the older detector meant by raising it at all.
+          similarity: record.possibleDuplicate.similarity ?? DUPLICATE_SUGGESTION_THRESHOLD,
+        }
+      : null,
+    mergedIntoQuestionId: record.mergedIntoQuestionId,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     answeredAt: record.answeredAt?.toISOString() ?? null,
@@ -131,6 +145,7 @@ export function toAttendeeSessionResponse(
     displayName: attendee.displayName,
     identityMode: policy.attendeeIdentityMode,
     moderationMode: policy.moderationMode,
+    allowUpvotes: policy.allowUpvotes,
     limits: {
       minQuestionLength: policy.minQuestionLength,
       maxQuestionLength: policy.maxQuestionLength,

@@ -4,7 +4,11 @@ import { Prisma } from '@prisma/client';
 // status counts below without restating the list of statuses a third time.
 import { computeRankScore, QuestionStatus, type QuestionSort } from '@eventq/contracts';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
-import { DuplicateQuestionError, QuestionNotFoundError } from '../domain/question.errors';
+import {
+  DuplicateQuestionError,
+  InvalidMergeTargetError,
+  QuestionNotFoundError,
+} from '../domain/question.errors';
 import { ROOM_VISIBLE_STATUSES } from '../domain/question-lifecycle';
 import {
   dateKey,
@@ -24,6 +28,8 @@ import type {
   QuestionRecord,
   QuestionRepository,
   QuestionStatusCounts,
+  SimilarityCandidateRecord,
+  VoteOutcome,
 } from '../domain/question.repository';
 
 /**
@@ -40,14 +46,18 @@ import type {
  */
 
 /**
- * pg_trgm similarity above which two questions are "probably the same".
+ * pg_trgm similarity above which a question is worth handing to the domain
+ * for a proper look.
  *
- * 0.6 is deliberately permissive: the consequence of a match is that a
- * moderator is asked to look, never that an attendee is refused. A stricter
- * value would miss real duplicates; a looser one would flag every question
- * about the same topic and make the signal worthless.
+ * Far below the 0.6 at which a moderator is actually asked to compare two
+ * questions, and that gap is the point. A reworded question shares only a
+ * handful of trigrams with its original — "how can businesses use ai" scores
+ * about 0.3 against "how can i use ai in my company" — so a recall bar set
+ * where the decision bar is would never let the domain see the pairs it exists
+ * to catch. The cost of being generous here is scoring ten short strings in
+ * memory, which is nothing.
  */
-const SIMILARITY_THRESHOLD = 0.6;
+const CANDIDATE_RECALL_THRESHOLD = 0.2;
 
 /** Statuses a new question could meaningfully duplicate. A rejected or spam
  *  question is not something a later one should be flagged against. */
@@ -128,11 +138,17 @@ export class PrismaQuestionRepository implements QuestionRepository {
             status: data.status,
             pinnedAt: null,
           }),
+          // The duplicate suggestion lives on the row, where a moderator's
+          // dismissal can clear it. The audit trail below still records that
+          // it was raised — an append-only record of what the system thought,
+          // separate from the current state of what a person decided.
+          possibleDuplicateOfQuestionId: data.possibleDuplicate?.questionId ?? null,
+          duplicateSimilarity: data.possibleDuplicate?.similarity ?? null,
           // Why the system held this question, recorded in the immutable
           // moderation trail rather than on the question row. The audit table
           // already exists for exactly this, and a moderator needs the reason
           // far more often than any query needs to filter on it.
-          ...(data.flags.length > 0 || data.possibleDuplicateOfQuestionId
+          ...(data.flags.length > 0 || data.possibleDuplicate
             ? {
                 moderationActions: {
                   create: {
@@ -140,7 +156,8 @@ export class PrismaQuestionRepository implements QuestionRepository {
                     action: 'auto_flag',
                     metadata: {
                       signals: data.flags,
-                      possibleDuplicateOfQuestionId: data.possibleDuplicateOfQuestionId ?? null,
+                      possibleDuplicateOfQuestionId: data.possibleDuplicate?.questionId ?? null,
+                      similarity: data.possibleDuplicate?.similarity ?? null,
                     },
                   },
                 },
@@ -183,23 +200,33 @@ export class PrismaQuestionRepository implements QuestionRepository {
     return question ? toQuestionRecord(question) : null;
   }
 
-  async findSimilar(eventId: string, normalizedBody: string): Promise<{ id: string } | null> {
+  async findSimilarityCandidates(
+    eventId: string,
+    normalizedBody: string,
+    limit: number,
+  ): Promise<SimilarityCandidateRecord[]> {
     // A TAGGED TEMPLATE, not $queryRawUnsafe. Every interpolation below becomes
     // a bound parameter, so attendee text is data and can never be parsed as
-    // SQL. This is the one place in the module that writes SQL by hand, and it
-    // is the single most important line in the file to get right.
-    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
-      SELECT id
+    // SQL. This is one of the few places in the module that writes SQL by
+    // hand, and it is the single most important thing in the file to get right.
+    //
+    // The bar here is RECALL, not precision: it only has to make sure a
+    // reworded question — which shares a few trigrams with its original, not
+    // many — is in the short list the domain then scores properly. The
+    // `similarity() >` predicate is what lets Postgres use the GIN trigram
+    // index instead of scoring every question on the event.
+    return this.prisma.$queryRaw<SimilarityCandidateRecord[]>`
+      SELECT id,
+             "normalizedBody",
+             similarity("normalizedBody", ${normalizedBody})::float8 AS "trigramSimilarity"
         FROM questions
        WHERE "eventId" = ${eventId}::uuid
          AND "deletedAt" IS NULL
          AND status = ANY(${LIVE_STATUSES}::"QuestionStatus"[])
-         AND similarity("normalizedBody", ${normalizedBody}) > ${SIMILARITY_THRESHOLD}
+         AND similarity("normalizedBody", ${normalizedBody}) > ${CANDIDATE_RECALL_THRESHOLD}
        ORDER BY similarity("normalizedBody", ${normalizedBody}) DESC
-       LIMIT 1
+       LIMIT ${limit}
     `;
-
-    return rows[0] ?? null;
   }
 
   async findVisibleForAttendee(input: {
@@ -207,7 +234,7 @@ export class PrismaQuestionRepository implements QuestionRepository {
     attendeeId: string;
     cursor?: string | undefined;
     limit: number;
-  }): Promise<QuestionPage<QuestionRecord & { isMine: boolean }>> {
+  }): Promise<QuestionPage<QuestionRecord & { isMine: boolean; hasVoted: boolean }>> {
     const rows = await this.prisma.question.findMany({
       where: {
         eventId: input.eventId,
@@ -224,7 +251,13 @@ export class PrismaQuestionRepository implements QuestionRepository {
           { attendeeId: input.attendeeId },
         ],
       },
-      select: QUESTION_SELECTION,
+      select: {
+        ...QUESTION_SELECTION,
+        // THIS attendee's vote only, as a presence check. One indexed lookup
+        // per row on the unique (questionId, attendeeId) pair — never the
+        // whole vote list, which is nobody's business and grows with the room.
+        votes: { where: { attendeeId: input.attendeeId }, select: { id: true }, take: 1 },
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: input.limit + 1,
       ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
@@ -237,9 +270,71 @@ export class PrismaQuestionRepository implements QuestionRepository {
     return toPage(
       rows,
       input.limit,
-      (row) => ({ ...toQuestionRecord(row), isMine: row.attendeeId === input.attendeeId }),
+      (row) => ({
+        ...toQuestionRecord(row),
+        isMine: row.attendeeId === input.attendeeId,
+        hasVoted: row.votes.length > 0,
+      }),
       (row) => row.id,
     );
+  }
+
+  async castVote(input: {
+    questionId: string;
+    eventId: string;
+    attendeeId: string;
+  }): Promise<VoteOutcome | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const question = await lockVotableQuestion(tx, input.questionId, input.eventId);
+      if (!question) return null;
+
+      /**
+       * ON CONFLICT DO NOTHING, which is what `skipDuplicates` compiles to. The
+       * unique index on (questionId, attendeeId) is the arbiter: if this
+       * attendee already voted, `count` is 0 and nothing else happens. That is
+       * what makes a double-tap and a retry identical to a single honest vote.
+       */
+      const { count } = await tx.questionVote.createMany({
+        data: [{ questionId: input.questionId, attendeeId: input.attendeeId }],
+        skipDuplicates: true,
+      });
+
+      if (count === 0) {
+        return { questionId: input.questionId, upvoteCount: question.upvoteCount, hasVoted: true };
+      }
+
+      const upvoteCount = question.upvoteCount + 1;
+      await writeVoteCount(tx, question, upvoteCount);
+
+      return { questionId: input.questionId, upvoteCount, hasVoted: true };
+    });
+  }
+
+  async withdrawVote(input: {
+    questionId: string;
+    eventId: string;
+    attendeeId: string;
+  }): Promise<VoteOutcome | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const question = await lockVotableQuestion(tx, input.questionId, input.eventId);
+      if (!question) return null;
+
+      const { count } = await tx.questionVote.deleteMany({
+        where: { questionId: input.questionId, attendeeId: input.attendeeId },
+      });
+
+      if (count === 0) {
+        return { questionId: input.questionId, upvoteCount: question.upvoteCount, hasVoted: false };
+      }
+
+      // Never below zero, even if the counter were somehow already out of step
+      // with the rows: a negative vote count on a live board is worse than a
+      // stale one.
+      const upvoteCount = Math.max(0, question.upvoteCount - 1);
+      await writeVoteCount(tx, question, upvoteCount);
+
+      return { questionId: input.questionId, upvoteCount, hasVoted: false };
+    });
   }
 
   async findForModeration(input: {
@@ -408,6 +503,255 @@ export class PrismaQuestionRepository implements QuestionRepository {
       return toModeratedRecord(updated);
     });
   }
+
+  async mergeQuestion(input: {
+    questionId: string;
+    intoQuestionId: string;
+    orgId: string;
+    actorId: string;
+  }): Promise<ModeratedQuestionRecord> {
+    return this.prisma.$transaction(async (tx) => {
+      /**
+       * Both rows locked in ONE statement, in id order.
+       *
+       * The order matters: two moderators merging A→B and B→A at the same
+       * moment would otherwise each lock one row and wait forever for the
+       * other — a deadlock Postgres would break by killing one of them with a
+       * 500. Locking in a fixed order means both wait on the same row first.
+       *
+       * The lock also freezes the survivor's vote count while votes are moved
+       * onto it: a live vote arriving mid-merge queues behind this transaction
+       * instead of racing the recount below.
+       */
+      const rows = await tx.$queryRaw<LockedQuestionRow[]>`
+        SELECT q.id, q."eventId", q.status, q."mergedIntoQuestionId",
+               q."upvoteCount", q."createdAt", q."pinnedAt"
+          FROM questions AS q
+          JOIN events AS e ON e.id = q."eventId"
+         WHERE q.id IN (${input.questionId}::uuid, ${input.intoQuestionId}::uuid)
+           AND e."orgId" = ${input.orgId}::uuid
+           AND e."deletedAt" IS NULL
+           AND q."deletedAt" IS NULL
+         ORDER BY q.id
+         FOR UPDATE OF q
+      `;
+
+      const duplicate = rows.find((row) => row.id === input.questionId);
+      const survivor = rows.find((row) => row.id === input.intoQuestionId);
+      if (!duplicate || !survivor) throw new QuestionNotFoundError();
+
+      // Re-checked under the lock. The use-case already refused these, but
+      // another moderator could have merged the survivor away in between.
+      if (survivor.eventId !== duplicate.eventId) {
+        throw new InvalidMergeTargetError('different_event');
+      }
+      if (survivor.mergedIntoQuestionId) throw new InvalidMergeTargetError('merged');
+      if (!LIVE_STATUSES.includes(survivor.status as QuestionStatus)) {
+        throw new InvalidMergeTargetError('not_live');
+      }
+
+      /**
+       * Votes move, they are not copied. The copy's own vote rows stay in
+       * place as the record of who supported it; what transfers is each
+       * attendee's SUPPORT, onto the survivor, at most once — `skipDuplicates`
+       * lets the unique index drop anyone who had already voted for both.
+       */
+      const votes = await tx.questionVote.findMany({
+        where: { questionId: input.questionId },
+        select: { attendeeId: true },
+      });
+      if (votes.length > 0) {
+        await tx.questionVote.createMany({
+          data: votes.map((vote) => ({
+            questionId: input.intoQuestionId,
+            attendeeId: vote.attendeeId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      // RECOUNTED from the rows rather than incremented by the transfer size:
+      // the transfer may have skipped some, and a count derived from the truth
+      // cannot drift from it.
+      const upvoteCount = await tx.questionVote.count({
+        where: { questionId: input.intoQuestionId },
+      });
+      await writeVoteCount(tx, survivor, upvoteCount);
+
+      const now = new Date();
+      const { count } = await tx.question.updateMany({
+        where: { id: input.questionId, event: { orgId: input.orgId }, deletedAt: null },
+        data: {
+          status: 'ARCHIVED',
+          deletedAt: now,
+          mergedIntoQuestionId: input.intoQuestionId,
+          // The suggestion is resolved by being confirmed; it must not linger
+          // as a prompt to do again what has just been done.
+          possibleDuplicateOfQuestionId: null,
+          duplicateSimilarity: null,
+          rankScore: computeRankScore({
+            upvoteCount: duplicate.upvoteCount,
+            createdAt: duplicate.createdAt,
+            status: 'ARCHIVED',
+            pinnedAt: duplicate.pinnedAt,
+          }),
+        },
+      });
+      if (count === 0) throw new QuestionNotFoundError();
+
+      /**
+       * Anything the system had flagged as a copy of the COPY now points at
+       * the survivor. Otherwise a later card would invite the moderator to
+       * merge into an archived question, and the server would refuse.
+       */
+      await tx.question.updateMany({
+        where: { possibleDuplicateOfQuestionId: input.questionId },
+        data: { possibleDuplicateOfQuestionId: input.intoQuestionId },
+      });
+
+      // Both sides of the merge get an audit row, so each question's own trail
+      // explains what happened to it without a join to the other.
+      await tx.moderationAction.createMany({
+        data: [
+          {
+            questionId: input.questionId,
+            actorType: 'USER',
+            actorId: input.actorId,
+            action: 'merge',
+            metadata: { mergedIntoQuestionId: input.intoQuestionId, votesMoved: votes.length },
+          },
+          {
+            questionId: input.intoQuestionId,
+            actorType: 'USER',
+            actorId: input.actorId,
+            action: 'absorb',
+            metadata: { mergedFromQuestionId: input.questionId, votesMoved: votes.length },
+          },
+        ],
+      });
+
+      const archived = await tx.question.findFirstOrThrow({
+        where: { id: input.questionId },
+        select: MODERATION_SELECTION,
+      });
+
+      return toModeratedRecord(archived);
+    });
+  }
+
+  async dismissDuplicate(input: {
+    questionId: string;
+    orgId: string;
+    actorId: string;
+  }): Promise<ModeratedQuestionRecord> {
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.question.findFirst({
+        where: { id: input.questionId, event: { orgId: input.orgId }, deletedAt: null },
+        select: { possibleDuplicateOfQuestionId: true, duplicateSimilarity: true },
+      });
+      if (!before) throw new QuestionNotFoundError();
+
+      const { count } = await tx.question.updateMany({
+        where: { id: input.questionId, event: { orgId: input.orgId }, deletedAt: null },
+        data: { possibleDuplicateOfQuestionId: null, duplicateSimilarity: null },
+      });
+      if (count === 0) throw new QuestionNotFoundError();
+
+      // What was dismissed is preserved in the trail even though the row no
+      // longer carries it: a later reviewer can still see that the system
+      // suggested X at 0.7 and a person disagreed.
+      await tx.moderationAction.create({
+        data: {
+          questionId: input.questionId,
+          actorType: 'USER',
+          actorId: input.actorId,
+          action: 'dismiss_duplicate',
+          metadata: {
+            dismissedQuestionId: before.possibleDuplicateOfQuestionId,
+            similarity: before.duplicateSimilarity,
+          },
+        },
+      });
+
+      const updated = await tx.question.findFirstOrThrow({
+        where: { id: input.questionId },
+        select: MODERATION_SELECTION,
+      });
+
+      return toModeratedRecord(updated);
+    });
+  }
+}
+
+/** The columns a vote or a merge needs to hold under lock. */
+interface LockedQuestionRow {
+  id: string;
+  eventId: string;
+  status: string;
+  mergedIntoQuestionId: string | null;
+  upvoteCount: number;
+  createdAt: Date;
+  pinnedAt: Date | null;
+}
+
+/**
+ * Locks a question for a vote, or reports that it cannot be voted on.
+ *
+ * `FOR UPDATE` is the whole concurrency story. Two attendees voting on the
+ * same question at the same instant would otherwise both read "5 votes" and
+ * both write "6". With the row locked, the second transaction waits for the
+ * first to commit and then reads 6, so the denormalised counter stays exactly
+ * equal to the number of vote rows — which an integration test asserts under
+ * genuinely concurrent requests.
+ *
+ * The predicate is also the authorisation: the event id comes from the token,
+ * so a question on another event does not match; and only what the room can
+ * see can be voted on, so a pending question cannot be discovered by trying.
+ */
+async function lockVotableQuestion(
+  tx: Prisma.TransactionClient,
+  questionId: string,
+  eventId: string,
+): Promise<LockedQuestionRow | null> {
+  const rows = await tx.$queryRaw<LockedQuestionRow[]>`
+    SELECT id, "eventId", status, "mergedIntoQuestionId", "upvoteCount", "createdAt", "pinnedAt"
+      FROM questions
+     WHERE id = ${questionId}::uuid
+       AND "eventId" = ${eventId}::uuid
+       AND "deletedAt" IS NULL
+       AND status = ANY(${ROOM_VISIBLE_STATUSES}::"QuestionStatus"[])
+     FOR UPDATE
+  `;
+
+  return rows[0] ?? null;
+}
+
+/**
+ * Writes a new vote count and the score that follows from it.
+ *
+ * The score is recomputed by the same function that wrote every other score,
+ * from the locked row's other inputs — one formula, wherever the number
+ * changes. Going through the Prisma client rather than raw SQL also bumps
+ * `updatedAt`, which is deliberate: votes reorder the board, so the dashboard's
+ * change token must move and offer the moderator a refresh.
+ */
+async function writeVoteCount(
+  tx: Prisma.TransactionClient,
+  question: LockedQuestionRow,
+  upvoteCount: number,
+): Promise<void> {
+  await tx.question.update({
+    where: { id: question.id },
+    data: {
+      upvoteCount,
+      rankScore: computeRankScore({
+        upvoteCount,
+        createdAt: question.createdAt,
+        status: question.status as QuestionStatus,
+        pinnedAt: question.pinnedAt,
+      }),
+    },
+  });
 }
 
 /**
@@ -511,6 +855,15 @@ const QUESTION_SELECTION = {
 
 const MODERATION_SELECTION = {
   ...QUESTION_SELECTION,
+  mergedIntoQuestionId: true,
+  duplicateSimilarity: true,
+  /**
+   * The suggested original, with enough of it to compare on one card. A left
+   * join on a primary key; null for the overwhelming majority of questions.
+   */
+  possibleDuplicateOf: {
+    select: { id: true, body: true, status: true, upvoteCount: true },
+  },
   moderationActions: {
     where: { actorType: 'SYSTEM' as const, action: 'auto_flag' },
     orderBy: { createdAt: 'desc' as const },
@@ -544,6 +897,14 @@ interface QuestionRow {
 }
 
 type ModerationRow = QuestionRow & {
+  mergedIntoQuestionId: string | null;
+  duplicateSimilarity: number | null;
+  possibleDuplicateOf: {
+    id: string;
+    body: string;
+    status: string;
+    upvoteCount: number;
+  } | null;
   moderationActions: Array<{ metadata: unknown }>;
   enrichment: { category: string | null } | null;
 };
@@ -573,15 +934,24 @@ function toModeratedRecord(row: ModerationRow): ModeratedQuestionRecord {
   return {
     ...toQuestionRecord(row),
     flags: readSignals(metadata),
-    possibleDuplicateOfQuestionId: readDuplicateId(metadata),
+    possibleDuplicate: row.possibleDuplicateOf
+      ? {
+          questionId: row.possibleDuplicateOf.id,
+          body: row.possibleDuplicateOf.body,
+          status: row.possibleDuplicateOf.status as QuestionStatus,
+          upvoteCount: row.possibleDuplicateOf.upvoteCount,
+          similarity: row.duplicateSimilarity,
+        }
+      : null,
+    mergedIntoQuestionId: row.mergedIntoQuestionId,
     category: row.enrichment?.category ?? null,
   };
 }
 
 /**
  * Json columns are `unknown` at the type level and genuinely arbitrary at
- * runtime, so both readers below validate rather than cast. A row written by an
- * older version of this code must degrade to "no flags", not crash a moderation
+ * runtime, so this validates rather than casts. A row written by an older
+ * version of this code must degrade to "no flags", not crash a moderation
  * queue in the middle of a live event.
  */
 function readSignals(metadata: unknown): string[] {
@@ -589,14 +959,6 @@ function readSignals(metadata: unknown): string[] {
 
   const signals = (metadata as { signals?: unknown }).signals;
   return Array.isArray(signals) ? signals.filter((s): s is string => typeof s === 'string') : [];
-}
-
-function readDuplicateId(metadata: unknown): string | null {
-  if (typeof metadata !== 'object' || metadata === null) return null;
-
-  const id = (metadata as { possibleDuplicateOfQuestionId?: unknown })
-    .possibleDuplicateOfQuestionId;
-  return typeof id === 'string' ? id : null;
 }
 
 /**

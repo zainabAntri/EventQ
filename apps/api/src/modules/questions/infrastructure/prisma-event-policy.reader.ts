@@ -38,6 +38,7 @@ const SELECTION = {
       moderationMode: true,
       attendeeIdentityMode: true,
       allowAnonymousPost: true,
+      allowUpvotes: true,
       minQuestionLength: true,
       maxQuestionLength: true,
       submitLimitCount: true,
@@ -55,6 +56,7 @@ interface EventPolicyRow {
     moderationMode: string;
     attendeeIdentityMode: string;
     allowAnonymousPost: boolean;
+    allowUpvotes: boolean;
     minQuestionLength: number;
     maxQuestionLength: number;
     submitLimitCount: number;
@@ -82,6 +84,7 @@ function toPolicy(event: EventPolicyRow): EventSubmissionPolicy {
     attendeeIdentityMode: (settings?.attendeeIdentityMode ??
       'OPTIONAL') as EventSubmissionPolicy['attendeeIdentityMode'],
     allowAnonymousPost: settings?.allowAnonymousPost ?? true,
+    allowUpvotes: settings?.allowUpvotes ?? true,
     minQuestionLength: settings?.minQuestionLength ?? 10,
     maxQuestionLength: settings?.maxQuestionLength ?? 500,
     submitLimitCount: settings?.submitLimitCount ?? 5,

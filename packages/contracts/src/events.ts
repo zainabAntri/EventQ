@@ -46,6 +46,10 @@ export const EventSettingsInput = z.object({
    *  exposes its contents publicly, which is a privacy decision, not an SEO
    *  one. */
   isPubliclyListed: z.boolean().optional(),
+  /** Whether attendees may upvote questions. On by default: ranking by the
+   *  room's support is the point of the product, so switching it off is the
+   *  deliberate choice. */
+  allowUpvotes: z.boolean().optional(),
 });
 export type EventSettingsInput = z.infer<typeof EventSettingsInput>;
 
@@ -115,6 +119,7 @@ export const EventSettingsResponse = z.object({
   moderationMode: ModerationMode,
   attendeeIdentityMode: AttendeeIdentityMode,
   isPubliclyListed: z.boolean(),
+  allowUpvotes: z.boolean(),
 });
 export type EventSettingsResponse = z.infer<typeof EventSettingsResponse>;
 

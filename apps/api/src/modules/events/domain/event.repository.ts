@@ -19,6 +19,7 @@ export interface EventSettingsData {
   accessMode: EventAccessMode;
   moderationMode: ModerationMode;
   attendeeIdentityMode: AttendeeIdentityMode;
+  allowUpvotes: boolean;
 }
 
 /**
@@ -33,6 +34,7 @@ export interface EventSettingsPatch {
   accessMode?: EventAccessMode | undefined;
   moderationMode?: ModerationMode | undefined;
   attendeeIdentityMode?: AttendeeIdentityMode | undefined;
+  allowUpvotes?: boolean | undefined;
 }
 
 export interface EventRecord {

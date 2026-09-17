@@ -416,6 +416,15 @@ model Question {
   /// once; a self-reference or a cycle is rejected as a domain invariant.
   mergedIntoQuestionId String? @db.Uuid
 
+  /// A SUGGESTION, never a decision. Set by the system on submission when the
+  /// text closely resembles an existing question; cleared when a moderator
+  /// dismisses it, or superseded by `mergedIntoQuestionId` when they confirm.
+  /// Nothing is hidden from the room on the strength of this column alone.
+  possibleDuplicateOfQuestionId String? @db.Uuid
+  /// 0–1. How alike the two questions were judged to be, so a moderator can
+  /// weigh a 0.95 differently from a 0.62 rather than seeing one flat flag.
+  duplicateSimilarity           Float?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -426,6 +435,11 @@ model Question {
 
   mergedInto Question?  @relation("QuestionMerge", fields: [mergedIntoQuestionId], references: [id], onDelete: SetNull)
   mergedFrom Question[] @relation("QuestionMerge")
+
+  /// SetNull rather than Cascade: if the original is hard-deleted the
+  /// suggestion simply evaporates, and the newer question stays.
+  possibleDuplicateOf Question?  @relation("QuestionDuplicateSuggestion", fields: [possibleDuplicateOfQuestionId], references: [id], onDelete: SetNull)
+  suggestedDuplicates Question[] @relation("QuestionDuplicateSuggestion")
 
   topicId String? @db.Uuid
   topic   Topic?  @relation(fields: [topicId], references: [id], onDelete: SetNull)
@@ -460,6 +474,7 @@ model Question {
   @@index([eventId, status, createdAt(sort: Desc)])
   @@index([eventId, attendeeId])
   @@index([mergedIntoQuestionId])
+  @@index([possibleDuplicateOfQuestionId])
   @@index([topicId])
 
   /// Trigram index for near-duplicate detection. Runs on our own Postgres at
