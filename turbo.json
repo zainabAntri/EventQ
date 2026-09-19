@@ -6,7 +6,14 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      // Strict env mode strips anything not listed here before `next build`
+      // runs, and leaves it out of the cache hash. NEXT_PUBLIC_* survive only
+      // because Turbo infers them for Next.js; API_PROXY_TARGET has no such
+      // prefix on purpose (it is server-only), so it must be declared or the
+      // deployed site silently builds with no API rewrites — and a later change
+      // to it replays the stale cached build.
+      "env": ["API_PROXY_TARGET"]
     },
     "dev": {
       "cache": false,
