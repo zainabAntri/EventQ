@@ -20,6 +20,12 @@
 }
 
 :root {
+  /* Tells the browser which scheme the page follows, so NATIVE controls it
+     paints itself — <select> popups, scrollbars, date pickers — match. Without
+     it they stay light-mode: on the dark dashboard the sort dropdown drew grey
+     option text on a dark popup and only the highlighted row was readable. */
+  color-scheme: light dark;
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.21 0.02 258);
   --muted: oklch(0.55 0.01 258);
