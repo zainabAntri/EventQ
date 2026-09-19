@@ -36,6 +36,27 @@ const nextConfig: NextConfig = {
   // is its own CI step, which is better anyway — a lint failure is then
   // attributable to lint rather than buried in build output.
 
+  /**
+   * Same-origin proxy for the API.
+   *
+   * The auth cookies are SameSite=Lax and host-only (see the API's
+   * auth.cookies.ts), so the browser only sends them when the API appears on
+   * the SAME origin as the pages. When API_PROXY_TARGET is set, Next forwards
+   * /api/v1/* and /health/* there and NEXT_PUBLIC_API_URL is this site's own
+   * origin. Locally it is unset and the browser calls :4000 directly.
+   *
+   * Server-only on purpose: the browser never needs to know where the API
+   * really lives.
+   */
+  async rewrites() {
+    const target = process.env.API_PROXY_TARGET;
+    if (!target) return [];
+    return [
+      { source: '/api/v1/:path*', destination: `${target}/api/v1/:path*` },
+      { source: '/health/:path*', destination: `${target}/health/:path*` },
+    ];
+  },
+
   async headers() {
     return [
       {
