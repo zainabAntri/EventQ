@@ -134,6 +134,7 @@ export class PrismaQuestionRepository implements QuestionRepository {
           // safely and a decaying one cannot.
           rankScore: computeRankScore({
             upvoteCount: 0,
+            askedByCount: 1,
             createdAt: now,
             status: data.status,
             pinnedAt: null,
@@ -443,7 +444,7 @@ export class PrismaQuestionRepository implements QuestionRepository {
        */
       const existing = await tx.question.findFirst({
         where: { id: input.questionId, event: { orgId: input.orgId }, deletedAt: null },
-        select: { upvoteCount: true, createdAt: true, pinnedAt: true },
+        select: { upvoteCount: true, askedByCount: true, createdAt: true, pinnedAt: true },
       });
 
       if (!existing) throw new QuestionNotFoundError();
@@ -460,6 +461,7 @@ export class PrismaQuestionRepository implements QuestionRepository {
           // the same one that wrote the value in the first place.
           rankScore: computeRankScore({
             upvoteCount: existing.upvoteCount,
+            askedByCount: existing.askedByCount,
             createdAt: existing.createdAt,
             status: input.status,
             pinnedAt: existing.pinnedAt,
@@ -525,7 +527,7 @@ export class PrismaQuestionRepository implements QuestionRepository {
        */
       const rows = await tx.$queryRaw<LockedQuestionRow[]>`
         SELECT q.id, q."eventId", q.status, q."mergedIntoQuestionId",
-               q."upvoteCount", q."createdAt", q."pinnedAt"
+               q."upvoteCount", q."askedByCount", q."createdAt", q."pinnedAt"
           FROM questions AS q
           JOIN events AS e ON e.id = q."eventId"
          WHERE q.id IN (${input.questionId}::uuid, ${input.intoQuestionId}::uuid)
@@ -576,7 +578,17 @@ export class PrismaQuestionRepository implements QuestionRepository {
       const upvoteCount = await tx.questionVote.count({
         where: { questionId: input.intoQuestionId },
       });
-      await writeVoteCount(tx, survivor, upvoteCount);
+
+      /**
+       * The people who ASKED transfer too, not just the ones who voted. The
+       * copy's author never voted for the survivor — they wrote their own
+       * question instead — so without this a question five people typed
+       * would rank like one nobody cared about. The copy's own count comes
+       * along, so a copy that had already absorbed others is not flattened
+       * to one. This is the term the ranking's `demand` is built on.
+       */
+      const askedByCount = survivor.askedByCount + duplicate.askedByCount;
+      await writeVoteCount(tx, { ...survivor, askedByCount }, upvoteCount, { askedByCount });
 
       const now = new Date();
       const { count } = await tx.question.updateMany({
@@ -591,6 +603,7 @@ export class PrismaQuestionRepository implements QuestionRepository {
           duplicateSimilarity: null,
           rankScore: computeRankScore({
             upvoteCount: duplicate.upvoteCount,
+            askedByCount: duplicate.askedByCount,
             createdAt: duplicate.createdAt,
             status: 'ARCHIVED',
             pinnedAt: duplicate.pinnedAt,
@@ -690,6 +703,7 @@ interface LockedQuestionRow {
   status: string;
   mergedIntoQuestionId: string | null;
   upvoteCount: number;
+  askedByCount: number;
   createdAt: Date;
   pinnedAt: Date | null;
 }
@@ -714,7 +728,7 @@ async function lockVotableQuestion(
   eventId: string,
 ): Promise<LockedQuestionRow | null> {
   const rows = await tx.$queryRaw<LockedQuestionRow[]>`
-    SELECT id, "eventId", status, "mergedIntoQuestionId", "upvoteCount", "createdAt", "pinnedAt"
+    SELECT id, "eventId", status, "mergedIntoQuestionId", "upvoteCount", "askedByCount", "createdAt", "pinnedAt"
       FROM questions
      WHERE id = ${questionId}::uuid
        AND "eventId" = ${eventId}::uuid
@@ -739,13 +753,17 @@ async function writeVoteCount(
   tx: Prisma.TransactionClient,
   question: LockedQuestionRow,
   upvoteCount: number,
+  /** Extra columns written in the same statement; a merge also moves askers. */
+  extra: { askedByCount?: number } = {},
 ): Promise<void> {
   await tx.question.update({
     where: { id: question.id },
     data: {
       upvoteCount,
+      ...extra,
       rankScore: computeRankScore({
         upvoteCount,
+        askedByCount: question.askedByCount,
         createdAt: question.createdAt,
         status: question.status as QuestionStatus,
         pinnedAt: question.pinnedAt,
@@ -845,6 +863,7 @@ const QUESTION_SELECTION = {
   status: true,
   isAnonymous: true,
   upvoteCount: true,
+  askedByCount: true,
   rankScore: true,
   pinnedAt: true,
   createdAt: true,
@@ -862,7 +881,7 @@ const MODERATION_SELECTION = {
    * join on a primary key; null for the overwhelming majority of questions.
    */
   possibleDuplicateOf: {
-    select: { id: true, body: true, status: true, upvoteCount: true },
+    select: { id: true, body: true, status: true, upvoteCount: true, askedByCount: true },
   },
   moderationActions: {
     where: { actorType: 'SYSTEM' as const, action: 'auto_flag' },
@@ -897,6 +916,7 @@ interface QuestionRow {
   status: string;
   isAnonymous: boolean;
   upvoteCount: number;
+  askedByCount: number;
   rankScore: number;
   pinnedAt: Date | null;
   createdAt: Date;
@@ -913,6 +933,7 @@ type ModerationRow = QuestionRow & {
     body: string;
     status: string;
     upvoteCount: number;
+    askedByCount: number;
   } | null;
   moderationActions: Array<{ metadata: unknown }>;
   enrichment: {
@@ -935,6 +956,7 @@ function toQuestionRecord(row: QuestionRow): QuestionRecord {
     status: row.status as QuestionStatus,
     isAnonymous: row.isAnonymous,
     upvoteCount: row.upvoteCount,
+    askedByCount: row.askedByCount,
     rankScore: row.rankScore,
     pinnedAt: row.pinnedAt,
     authorName: row.attendee?.displayName ?? null,
@@ -956,6 +978,7 @@ function toModeratedRecord(row: ModerationRow): ModeratedQuestionRecord {
           body: row.possibleDuplicateOf.body,
           status: row.possibleDuplicateOf.status as QuestionStatus,
           upvoteCount: row.possibleDuplicateOf.upvoteCount,
+          askedByCount: row.possibleDuplicateOf.askedByCount,
           similarity: row.duplicateSimilarity,
         }
       : null,

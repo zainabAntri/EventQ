@@ -51,6 +51,7 @@ export function toPublicQuestionResponse(
     authorName: anonymous ? null : record.authorName,
     isAnonymous: anonymous,
     upvoteCount: record.upvoteCount,
+    askedByCount: record.askedByCount,
     isMine: record.isMine,
     hasVoted: record.hasVoted,
     createdAt: record.createdAt.toISOString(),
@@ -76,6 +77,7 @@ export function toQuestionResponse(record: ModeratedQuestionRecord): QuestionRes
     authorName: record.isAnonymous ? null : record.authorName,
     isAnonymous: record.isAnonymous,
     upvoteCount: record.upvoteCount,
+    askedByCount: record.askedByCount,
     flags: record.flags,
     possibleDuplicate: record.possibleDuplicate
       ? {
@@ -83,6 +85,7 @@ export function toQuestionResponse(record: ModeratedQuestionRecord): QuestionRes
           body: record.possibleDuplicate.body,
           status: record.possibleDuplicate.status,
           upvoteCount: record.possibleDuplicate.upvoteCount,
+          askedByCount: record.possibleDuplicate.askedByCount,
           // A suggestion raised before scores were recorded carries none. It
           // is reported at the threshold — "just similar enough to ask" — which
           // is exactly what the older detector meant by raising it at all.

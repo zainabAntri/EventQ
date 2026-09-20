@@ -28,6 +28,8 @@ export interface QuestionRecord {
   status: QuestionStatus;
   isAnonymous: boolean;
   upvoteCount: number;
+  /** Author plus everyone whose duplicate was merged in. Never below 1. */
+  askedByCount: number;
   authorName: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -47,6 +49,7 @@ export interface DuplicateSuggestionRecord {
   body: string;
   status: QuestionStatus;
   upvoteCount: number;
+  askedByCount: number;
   /** 0–1. Null only for suggestions raised before a score was recorded. */
   similarity: number | null;
 }

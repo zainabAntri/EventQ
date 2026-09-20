@@ -117,7 +117,13 @@ describe('organizer dashboard performance', () => {
           status,
           upvoteCount,
           createdAt,
-          rankScore: computeRankScore({ upvoteCount, createdAt, status, pinnedAt: null }),
+          rankScore: computeRankScore({
+            upvoteCount,
+            askedByCount: 1,
+            createdAt,
+            status,
+            pinnedAt: null,
+          }),
         });
       }
 

@@ -49,6 +49,7 @@ function question(overrides: Partial<PublicQuestionResponse> = {}): PublicQuesti
     authorName: 'Priya Raman',
     isAnonymous: false,
     upvoteCount: 8,
+    askedByCount: 1,
     isMine: false,
     hasVoted: false,
     createdAt: '2026-09-17T10:00:00.000Z',
