@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { ProblemDetails } from '@eventq/contracts';
+import { computeRankScore, ProblemDetails } from '@eventq/contracts';
 import {
   csrf,
   registerOrganizer,
@@ -318,6 +318,64 @@ describe('duplicate questions', () => {
       });
       expect(copy.deletedAt).not.toBeNull();
       expect(copy.mergedIntoQuestionId).toBe(original.id);
+    });
+
+    it('counts the copy’s author as an asker and lifts the survivor’s rank', async () => {
+      const first = await join(event.joinCode);
+      const second = await join(event.joinCode);
+      const original = await ask(event.joinCode, first, ORIGINAL);
+      const reworded = await ask(event.joinCode, second, REWORDED);
+
+      const before = await testApp.db.prisma.question.findUniqueOrThrow({
+        where: { id: original.id },
+      });
+      expect(before.askedByCount).toBe(1);
+
+      await merge(alice, reworded.id, original.id).expect(200);
+
+      const survivor = await testApp.db.prisma.question.findUniqueOrThrow({
+        where: { id: original.id },
+      });
+      // Nobody voted. The second person's support is that they ASKED, and the
+      // survivor's score must reflect it, or five people typing the same thing
+      // would rank like one nobody cared about.
+      expect(survivor.askedByCount).toBe(2);
+      expect(survivor.upvoteCount).toBe(0);
+      expect(survivor.rankScore).toBeGreaterThan(before.rankScore);
+      expect(survivor.rankScore).toBe(
+        computeRankScore({
+          upvoteCount: 0,
+          askedByCount: 2,
+          createdAt: survivor.createdAt,
+          status: survivor.status,
+          pinnedAt: survivor.pinnedAt,
+        }),
+      );
+
+      // The count is what the moderator and the room see.
+      const item = await moderatorView(alice, event.id, original.id);
+      expect(item?.askedByCount).toBe(2);
+    });
+
+    it('carries an absorbed count forward when a merged survivor is merged again', async () => {
+      const [a, b, c] = await Promise.all([
+        join(event.joinCode),
+        join(event.joinCode),
+        join(event.joinCode),
+      ]);
+      const original = await ask(event.joinCode, a, ORIGINAL);
+      const reworded = await ask(event.joinCode, b, REWORDED);
+      const unrelated = await ask(event.joinCode, c, 'Where can I park near the venue?');
+
+      await merge(alice, reworded.id, original.id).expect(200);
+      // A moderator decides the parking one belongs with them too. The
+      // survivor's count was already 2; it must become 3, not 2.
+      await merge(alice, unrelated.id, original.id).expect(200);
+
+      const survivor = await testApp.db.prisma.question.findUniqueOrThrow({
+        where: { id: original.id },
+      });
+      expect(survivor.askedByCount).toBe(3);
     });
 
     it('takes the copy off the attendee board and leaves the survivor', async () => {

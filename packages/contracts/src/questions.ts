@@ -125,6 +125,8 @@ export const PublicQuestionResponse = z.object({
   authorName: z.string().nullable(),
   isAnonymous: z.boolean(),
   upvoteCount: z.number().int().nonnegative(),
+  /** Author plus everyone whose duplicate was merged into this. Never below 1. */
+  askedByCount: z.number().int().positive(),
   /** True for the caller's own question, so the UI can label it "yours". */
   isMine: z.boolean(),
   /**
@@ -191,6 +193,8 @@ export const DuplicateSuggestion = z.object({
   body: z.string(),
   status: QuestionStatus,
   upvoteCount: z.number().int().nonnegative(),
+  /** Author plus everyone whose duplicate was merged into this. Never below 1. */
+  askedByCount: z.number().int().positive(),
   similarity: z.number().min(0).max(1),
 });
 export type DuplicateSuggestion = z.infer<typeof DuplicateSuggestion>;
@@ -224,6 +228,8 @@ export const QuestionResponse = z.object({
   authorName: z.string().nullable(),
   isAnonymous: z.boolean(),
   upvoteCount: z.number().int().nonnegative(),
+  /** Author plus everyone whose duplicate was merged into this. Never below 1. */
+  askedByCount: z.number().int().positive(),
   /** Signal names from the spam heuristics, empty for a clean submission. */
   flags: z.array(z.string()),
   /**

@@ -162,6 +162,7 @@ describe('attendee voting', () => {
       expect(after.rankScore).toBe(
         computeRankScore({
           upvoteCount: 1,
+          askedByCount: after.askedByCount,
           createdAt: after.createdAt,
           status: after.status,
           pinnedAt: after.pinnedAt,

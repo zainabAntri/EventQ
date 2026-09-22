@@ -172,6 +172,18 @@ export function QuestionCard({
           </span>
         ) : null}
 
+        {question.askedByCount > 1 ? (
+          // Only when duplicates were merged in: a badge reading "1 person"
+          // on every card would be noise, and the number only means anything
+          // once a moderator has confirmed that several people asked this.
+          <span
+            className="rounded-full border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 font-medium text-brand-700 dark:text-brand-300"
+            title="Asked by several attendees; their questions were merged into this one"
+          >
+            Asked by {question.askedByCount} people
+          </span>
+        ) : null}
+
         <span className="ml-auto font-medium tabular-nums">
           {question.upvoteCount}
           <span className="ml-1 font-normal text-[var(--muted)]">
@@ -394,6 +406,7 @@ function DuplicatePanel({
 function RankExplanation({ question }: { question: QuestionResponse }) {
   const parts = explainRankScore({
     upvoteCount: question.upvoteCount,
+    askedByCount: question.askedByCount,
     createdAt: question.createdAt,
     status: question.status,
     pinnedAt: question.pinnedAt,
@@ -404,6 +417,14 @@ function RankExplanation({ question }: { question: QuestionResponse }) {
       label: 'Support',
       value: parts.popularity,
       note: `${question.upvoteCount} ${question.upvoteCount === 1 ? 'vote' : 'votes'}, with diminishing returns`,
+    },
+    {
+      label: 'Demand',
+      value: parts.demand,
+      note:
+        question.askedByCount > 1
+          ? `asked by ${question.askedByCount} people; merged duplicates count as askers`
+          : 'asked once; grows when duplicates are merged in',
     },
     { label: 'Recency', value: parts.recency, note: 'newer questions start higher' },
     {

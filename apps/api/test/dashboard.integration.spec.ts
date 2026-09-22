@@ -124,6 +124,7 @@ describe('organizer dashboard', () => {
           deletedAt: status === 'ARCHIVED' ? createdAt : null,
           rankScore: computeRankScore({
             upvoteCount: spec.upvoteCount ?? 0,
+            askedByCount: 1,
             createdAt,
             status,
             pinnedAt,
@@ -820,6 +821,7 @@ describe('organizer dashboard', () => {
       expect(question.rankScore).toBe(
         computeRankScore({
           upvoteCount: question.upvoteCount,
+          askedByCount: question.askedByCount,
           createdAt: question.createdAt,
           status: question.status,
           pinnedAt: question.pinnedAt,

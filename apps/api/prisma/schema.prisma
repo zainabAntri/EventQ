@@ -406,7 +406,12 @@ model Question {
   /// Denormalised, maintained in the same transaction as the vote. Reading a
   /// live board must never aggregate votes across the table.
   upvoteCount Int   @default(0)
-  /// upvotes / (age_hours + 2)^gravity, with a pinned boost. Computed in SQL.
+  /// How many attendees asked this. Starts at 1 (the author) and grows when a
+  /// duplicate is merged in, absorbing that copy's own count. Stored rather
+  /// than counted through `mergedFrom` because the rank score needs it on
+  /// every write, and because it must survive a merged copy being purged.
+  askedByCount Int  @default(1)
+  /// See packages/contracts/src/ranking.ts. Stored so ORDER BY is a keyset.
   rankScore   Float @default(0)
 
   pinnedAt   DateTime?

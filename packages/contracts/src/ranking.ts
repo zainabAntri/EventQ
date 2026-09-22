@@ -36,13 +36,14 @@ import type { QuestionStatus } from './enums.js';
  * Why the magnitudes look strange
  * ---------------------------------------------------------------------------
  *
- * The four terms are deliberately on wildly different scales, so that they form
+ * The five terms are deliberately on wildly different scales, so that they form
  * strict tiers rather than trading off against each other:
  *
  *   moderation status  ±1e9   a coarse tier; nothing outranks its way out of it
  *   organizer priority  1e6   pinned sits above everything in its own tier
  *   recency            ~1e4   grows ~17,500/year from the epoch
  *   popularity          0–6   log10 of the vote count
+ *   demand              0–8   log10 of how many people asked it
  *
  * Only DIFFERENCES matter to an ORDER BY, and the differences that can occur
  * within one event are what the gaps are sized against. Recency separates two
@@ -78,6 +79,18 @@ export const RANKING_WEIGHTS = Object.freeze({
    * material displaces it, which is about the length of one conference session.
    */
   popularity: 2,
+
+  /**
+   * Multiplier on log10(askedByCount).
+   *
+   * Typing out a question is a stronger signal than tapping a vote, so an
+   * extra asker is worth more than an extra upvote: at 4, a question asked by
+   * five people gains ~2.8 points, the same as ~25 upvotes or ~85 minutes of
+   * freshness. That is the product decision — what most of the room asked
+   * holds the top of the board through a whole session. A question asked once
+   * scores 0 here, so nothing changes until a moderator confirms a merge.
+   */
+  demand: 4,
 
   /**
    * Seconds of age equivalent to one point, so 30 minutes of freshness is worth
@@ -118,6 +131,8 @@ export const QUESTION_STATUS_TIER: Readonly<Record<QuestionStatus, number>> = Ob
 /** The columns a score is computed from. Nothing else may influence ordering. */
 export interface RankableQuestion {
   upvoteCount: number;
+  /** Author plus everyone whose duplicate was merged in. Never below 1. */
+  askedByCount: number;
   createdAt: Date | string;
   status: QuestionStatus;
   pinnedAt: Date | string | null;
@@ -127,6 +142,8 @@ export interface RankableQuestion {
 export interface RankScoreBreakdown {
   /** log10 of the vote count, weighted. Rises with attendee support. */
   popularity: number;
+  /** log10 of how many people asked it, weighted. Zero for a single asker. */
+  demand: number;
   /** Counts up from the epoch, so newer is always higher. */
   recency: number;
   /** Non-zero only for a pinned question. */
@@ -141,7 +158,7 @@ function toSeconds(value: Date | string): number {
 }
 
 /**
- * Decomposes a question's score into the four terms above.
+ * Decomposes a question's score into the five terms above.
  *
  * `computeRankScore` is this function's `total`, so the number stored in the
  * database and the number explained in the UI cannot diverge — there is only
@@ -153,6 +170,10 @@ export function explainRankScore(question: RankableQuestion): RankScoreBreakdown
   // it is scarce.
   const popularity = RANKING_WEIGHTS.popularity * Math.log10(question.upvoteCount + 1);
 
+  // Clamped at 1: a count below that is a data error, and must not turn into
+  // a negative term that quietly buries the question.
+  const demand = RANKING_WEIGHTS.demand * Math.log10(Math.max(question.askedByCount, 1));
+
   const recency =
     (toSeconds(question.createdAt) - RANKING_EPOCH_SECONDS) /
     RANKING_WEIGHTS.recencySecondsPerPoint;
@@ -163,10 +184,11 @@ export function explainRankScore(question: RankableQuestion): RankScoreBreakdown
 
   return {
     popularity,
+    demand,
     recency,
     priority,
     moderation,
-    total: popularity + recency + priority + moderation,
+    total: popularity + demand + recency + priority + moderation,
   };
 }
 

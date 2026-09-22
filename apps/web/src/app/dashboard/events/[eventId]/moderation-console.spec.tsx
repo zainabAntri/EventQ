@@ -109,6 +109,7 @@ function question(overrides: Partial<QuestionResponse> = {}): QuestionResponse {
     authorName: null,
     isAnonymous: true,
     upvoteCount: 0,
+    askedByCount: 1,
     flags: [],
     possibleDuplicate: null,
     mergedIntoQuestionId: null,
@@ -284,10 +285,28 @@ describe('what a moderator can see', () => {
     await userEvent.click(await screen.findByText(/why is this ranked here/i));
 
     expect(screen.getByText('Support')).toBeInTheDocument();
+    expect(screen.getByText('Demand')).toBeInTheDocument();
     expect(screen.getByText('Recency')).toBeInTheDocument();
     expect(screen.getByText('Priority')).toBeInTheDocument();
     expect(screen.getByText('Status')).toBeInTheDocument();
     expect(screen.getByText(/9 votes/)).toBeInTheDocument();
+  });
+
+  it('shows how many people asked a question once duplicates were merged in', async () => {
+    listQuestions.mockResolvedValue(page([question({ askedByCount: 5 })]));
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+
+    expect(await screen.findByText('Asked by 5 people')).toBeInTheDocument();
+  });
+
+  it('does not badge a question asked once — that is every question', async () => {
+    listQuestions.mockResolvedValue(page([question({ askedByCount: 1 })]));
+
+    render(<ModerationConsole eventId={EVENT_ID} />);
+
+    expect(await screen.findByText(/why is this ranked here/i)).toBeInTheDocument();
+    expect(screen.queryByText(/asked by/i)).not.toBeInTheDocument();
   });
 });
 
@@ -395,6 +414,7 @@ describe('duplicate suggestions', () => {
     body: 'How can I use AI in my company?',
     status: 'APPROVED' as const,
     upvoteCount: 4,
+    askedByCount: 1,
     similarity: 0.67,
   };
 

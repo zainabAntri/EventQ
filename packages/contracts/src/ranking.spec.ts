@@ -20,6 +20,7 @@ const BASE = new Date('2026-06-01T12:00:00.000Z');
 function question(overrides: Partial<RankableQuestion> = {}): RankableQuestion {
   return {
     upvoteCount: 0,
+    askedByCount: 1,
     createdAt: BASE,
     status: 'APPROVED',
     pinnedAt: null,
@@ -42,6 +43,57 @@ describe('question ranking', () => {
     for (const status of QuestionStatus.options) {
       expect(Number.isFinite(computeRankScore(question({ status })))).toBe(true);
     }
+  });
+
+  describe('demand', () => {
+    it('adds nothing for a question asked once, so unmerged boards are unchanged', () => {
+      expect(explainRankScore(question({ askedByCount: 1 })).demand).toBe(0);
+    });
+
+    it('ranks a question many people asked above one with a handful of votes', () => {
+      // Five people typed the same question and none of them voted; a moderator
+      // merged the copies. That is the room's priority, and it must beat a
+      // single question with a few taps of support.
+      const askedByMany = computeRankScore(question({ askedByCount: 5, upvoteCount: 0 }));
+      const votedByFew = computeRankScore(question({ askedByCount: 1, upvoteCount: 5 }));
+
+      expect(askedByMany).toBeGreaterThan(votedByFew);
+    });
+
+    it('weighs an extra asker more heavily than an extra upvote', () => {
+      const asker = explainRankScore(question({ askedByCount: 2 })).demand;
+      const voter = explainRankScore(question({ upvoteCount: 1 })).popularity;
+
+      expect(asker).toBeGreaterThan(voter);
+    });
+
+    it('holds the top of the board for a session, but not forever', () => {
+      // Asked by five is worth ~85 minutes of freshness: a question that old is
+      // still above a brand-new one, but a question from yesterday is not.
+      const askedByFive = computeRankScore(
+        question({ askedByCount: 5, createdAt: minutesAfter(-80) }),
+      );
+      const fresh = computeRankScore(question({ createdAt: BASE }));
+      const stale = computeRankScore(
+        question({ askedByCount: 5, createdAt: minutesAfter(-24 * 60) }),
+      );
+
+      expect(askedByFive).toBeGreaterThan(fresh);
+      expect(stale).toBeLessThan(fresh);
+    });
+
+    it('never goes negative on a corrupt count below one', () => {
+      expect(explainRankScore(question({ askedByCount: 0 })).demand).toBe(0);
+    });
+
+    it('cannot lift a question out of its moderation tier', () => {
+      const rejectedButDemanded = computeRankScore(
+        question({ status: 'REJECTED', askedByCount: 100_000 }),
+      );
+      const approvedAlone = computeRankScore(question({ status: 'APPROVED' }));
+
+      expect(rejectedButDemanded).toBeLessThan(approvedAlone);
+    });
   });
 
   describe('popularity', () => {
@@ -123,6 +175,7 @@ describe('question ranking', () => {
       const pinned = computeRankScore(question({ pinnedAt: BASE }));
       const wildlyPopular = computeRankScore({
         upvoteCount: 100_000,
+        askedByCount: 100_000,
         createdAt: minutesAfter(60 * 24 * 365),
         status: 'APPROVED',
         pinnedAt: null,

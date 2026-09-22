@@ -253,6 +253,7 @@ function BoardItem({
           {question.isMine ? 'You' : (question.authorName ?? 'Anonymous')}
           {question.isMine && question.status === 'PENDING' ? ' · waiting for a moderator' : ''}
           {question.status === 'ANSWERED' ? ' · answered' : ''}
+          {question.askedByCount > 1 ? ` · asked by ${question.askedByCount} people` : ''}
         </p>
       </div>
 
