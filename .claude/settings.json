@@ -42,7 +42,9 @@
       "Bash(git check-ignore *)",
       "Bash(git checkout *)",
       "Bash(git config *)",
-      "Bash(echo \"identity: $\\(git config user.name\\) <$\\(git config user.email\\)>\")"
+      "Bash(echo \"identity: $\\(git config user.name\\) <$\\(git config user.email\\)>\")",
+      "Bash(git commit *)",
+      "Bash(git --no-pager log --format='%h %s' -2)"
     ]
   }
 }
