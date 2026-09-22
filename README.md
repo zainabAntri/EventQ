@@ -6,7 +6,11 @@ An organizer creates an event; the system mints a join code, QR code and public 
 
 The first use case is business networking events. The architecture deliberately absorbs conferences, seminars, workshops, university events, webinars, corporate meetings and panel discussions without a schema change.
 
-> **Status: Phase 1 (foundation) complete.** The infrastructure below is built, tested and verified running. Business features — auth, events, questions, moderation — arrive in Phase 2.
+> **Status: phases 1–6 complete.** Organizer auth, the event lifecycle, anonymous attendee submission, the moderation console, upvoting with duplicate-merging, and the optional AI layer are all built, tested and merged.
+>
+> A $0 deployment runs on the public internet — web on Vercel, API and Redis on Render, Postgres on Supabase. See [`docs/deploy-free-tier.md`](docs/deploy-free-tier.md).
+>
+> Not yet built: projector view, event branding, exports and team invites.
 
 ---
 
@@ -15,7 +19,7 @@ The first use case is business networking events. The architecture deliberately 
 ```
 apps/
   web/          Next.js 16 App Router  ->  Vercel
-  api/          NestJS 11 modular monolith  ->  AWS ECS Fargate
+  api/          NestJS 11 modular monolith  ->  Render today; ECS Fargate is the production target
 packages/
   contracts/    zod schemas shared by both apps - the single source of truth
   config/       shared ESLint presets, including the architecture boundary rules
@@ -27,7 +31,7 @@ packages/
 
 **The layer rule is enforced by CI, not by convention.** Importing Prisma or NestJS inside a `domain/` folder fails `pnpm lint`. Architecture that is not enforced decays within a month.
 
-Full design: [`docs/architecture.md`](docs/architecture.md).
+Full design: [`docs/architecture.md`](docs/architecture.md). Working on the code: [`docs/development.md`](docs/development.md), which explains the layer rule and how to add a feature module without fighting it.
 
 ---
 
@@ -77,6 +81,14 @@ The seed prints a generated password and the demo join code (`EVENTQ26`). Passwo
 
 > Join codes use a Crockford-style alphabet that excludes `I`, `L`, `O` and `U`, because codes get read aloud across a noisy room. `DEMO2026` is _not_ a valid code — the `O` is excluded.
 
+### After pulling a schema change
+
+Run `pnpm db:deploy` whenever a pull or a branch switch brings a new migration.
+
+This is worth a habit, because the failure is misleading. Prisma will happily query a column your local database does not have yet; Postgres rejects it, and the API returns a generic 500 with a `traceId`. The dashboard then looks half-broken — the moderation tab counts render fine, because counting rows never selects the new column, while the question list underneath them fails. It reads like an application bug and is not one.
+
+`db:deploy` (`prisma migrate deploy`) only applies pending migrations. Prefer it over `db:migrate` (`prisma migrate dev`), which can decide your database has drifted and offer to reset it — taking your seeded demo event with it. Details in [`docs/migrations.md`](docs/migrations.md).
+
 ---
 
 ## Scripts
@@ -125,9 +137,18 @@ More: [`docs/testing.md`](docs/testing.md).
 
 ## AI
 
-EventQ has **no AI services and no AI SDK installed**. `AI_ENABLED=false` is the default and the product is designed to be fully functional with AI switched off permanently.
+The AI layer is **built and merged, and off by default**. The product is designed to be fully functional with AI switched off permanently, and the default configuration spends nothing.
 
-When it is eventually enabled (Phase 4), it runs entirely in background workers outside the request path, tiered so the high-volume mechanical work uses a small model, with a hard per-event budget enforced _before_ each call against a usage ledger. Estimated ceiling: ~$1.15 per 500-question event, capped at $2.
+Two independent switches must both be on before a single call is made:
+
+| Switch                    | Default | Scope                |
+| ------------------------- | ------- | -------------------- |
+| `AI_ENABLED`              | `false` | the whole deployment |
+| `EventSettings.aiEnabled` | `false` | one event            |
+
+Everything runs in background workers outside the request path, tiered so the high-volume mechanical work uses the cheap model: `claude-haiku-4-5` for classification and de-duplication, `claude-sonnet-5` for summaries. A hard per-event budget is enforced _before_ each call against a usage ledger (`AI_EVENT_BUDGET_MICROS`, default $2), with a monthly ceiling on top of it. Estimated real cost: ~$1.15 per 500-question event.
+
+Enabling it needs `ANTHROPIC_API_KEY`. Without one the app runs exactly as it does now.
 
 The database reserves tables for it (`question_enrichments`, `topics`, `ai_usage`) because adding columns to `questions` — the hottest table — later could mean a migration during a live event. Empty tables cost nothing.
 

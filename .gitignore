@@ -37,6 +37,11 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Claude Code — settings.json is shared tooling config and is tracked.
+# settings.local.json is per-developer and holds one machine's own approvals,
+# including absolute local paths, so it must never be committed.
+.claude/settings.local.json
+
 # Prisma
 apps/api/prisma/*.db
 apps/api/prisma/*.db-journal
