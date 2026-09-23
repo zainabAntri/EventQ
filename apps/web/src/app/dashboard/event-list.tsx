@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { AuthenticatedOrganizer, EventResponse } from '@eventq/contracts';
-import { Alert, Button, Spinner, buttonVariants } from '@/components/ui';
+import { Alert, Spinner, buttonVariants } from '@/components/ui';
 import { ApiError } from '@/lib/api-client';
-import { getCurrentOrganizer, listEvents, signOut } from '@/lib/api-client/organizer';
+import { getCurrentOrganizer, listEvents } from '@/lib/api-client/organizer';
 
 /**
  * The events an organizer can moderate, and the way in to creating one.
@@ -54,37 +54,15 @@ export function EventList() {
 
   return (
     <main id="main" className="mx-auto max-w-3xl px-5 py-8 sm:py-12">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Your events</h1>
-          {organizer ? (
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              {organizer.organization.name} · {organizer.organization.role.toLowerCase()}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Link
-            href="/dashboard/events/new"
-            className={buttonVariants({ size: 'sm', variant: 'primary' })}
-          >
-            New event
-          </Link>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              // Navigate regardless of the outcome: the API clears the cookies
-              // even for an already-expired session, and a failure here must not
-              // leave someone stuck on a page they meant to leave.
-              void signOut().finally(() => router.replace('/sign-in'));
-            }}
-          >
-            Sign out
-          </Button>
-        </div>
+      {/* New event and Sign out live in the dashboard bar (dashboard-nav.tsx),
+          which every organizer page shares. */}
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Your events</h1>
+        {organizer ? (
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            {organizer.organization.name} · {organizer.organization.role.toLowerCase()}
+          </p>
+        ) : null}
       </div>
 
       {error ? (
