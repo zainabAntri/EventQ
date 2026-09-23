@@ -1,4 +1,4 @@
-import type { EventResponse, PublicEventResponse } from '@eventq/contracts';
+import type { EventResponse, PublicEventResponse, PublicEventStatus } from '@eventq/contracts';
 import type { EventRecord, PublicEventRecord } from '../domain/event.repository';
 import { joinUrlFor } from '../domain/join-code';
 
@@ -23,6 +23,7 @@ export function toEventResponse(record: EventRecord, webOrigin: string): EventRe
     // the projector cannot disagree about where attendees go.
     joinUrl: joinUrlFor(webOrigin, record.joinCode),
     slug: record.slug,
+    accentColor: record.accentColor,
     startsAt: record.startsAt?.toISOString() ?? null,
     endsAt: record.endsAt?.toISOString() ?? null,
     timezone: record.timezone,
@@ -49,13 +50,33 @@ export function toEventResponse(record: EventRecord, webOrigin: string): EventRe
  * ids, settings and lifecycle timestamps have no representation here at all, so
  * they cannot be exposed by forgetting to strip them.
  */
-export function toPublicEventResponse(record: PublicEventRecord): PublicEventResponse {
+export function toPublicEventResponse(
+  record: PublicEventRecord,
+  /**
+   * Passed in rather than derived from `record.status`.
+   *
+   * The caller has already decided what this visitor may see, and that decision
+   * is the security control. Recomputing it here would put a second copy of the
+   * rule in the mapper, where a later edit could widen what is disclosed
+   * without touching the use case that is supposed to own it. The narrow type
+   * also makes it impossible to hand back DRAFT or ARCHIVED by accident.
+   */
+  visibility: 'open' | 'closed',
+): PublicEventResponse {
+  const status: PublicEventStatus = visibility === 'closed' ? 'CLOSED' : 'PUBLISHED';
+
   return {
     title: record.title,
     description: record.description,
     venue: record.venue,
     type: record.type,
     joinCode: record.joinCode,
+    status,
+    // Only ever populated for a closed event: there is nothing to say about
+    // when a live event ended, and a stray timestamp on an open one would be
+    // rendered as "this finished" by a client that trusted the field.
+    closedAt: status === 'CLOSED' ? (record.closedAt?.toISOString() ?? null) : null,
+    accentColor: record.accentColor,
     startsAt: record.startsAt?.toISOString() ?? null,
     endsAt: record.endsAt?.toISOString() ?? null,
     timezone: record.timezone,

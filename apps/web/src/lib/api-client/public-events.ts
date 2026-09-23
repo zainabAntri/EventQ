@@ -82,6 +82,30 @@ export function listPublicQuestions(
 }
 
 /**
+ * The public record of a finished event.
+ *
+ * No attendee token, deliberately: a closed event mints none, so this is the
+ * only attendee-facing read that carries no identity at all. Every item comes
+ * back with `isMine` and `hasVoted` false, because there is no "me" here.
+ */
+export function listEventArchive(
+  joinCode: string,
+  options: { cursor?: string; signal?: AbortSignal } = {},
+): Promise<PublicQuestionListResponse> {
+  const params = new URLSearchParams();
+  if (options.cursor) params.set('cursor', options.cursor);
+  const search = params.toString();
+
+  return apiRequest(
+    `/public/events/${encodeURIComponent(joinCode)}/archive${search ? `?${search}` : ''}`,
+    {
+      schema: PublicQuestionListResponse,
+      ...(options.signal ? { signal: options.signal } : {}),
+    },
+  );
+}
+
+/**
  * Upvote and withdraw.
  *
  * PUT and DELETE rather than POST because both are idempotent: "make sure my

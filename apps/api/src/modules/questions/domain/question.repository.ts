@@ -176,6 +176,26 @@ export interface QuestionRepository {
   }): Promise<QuestionPage<QuestionRecord & { isMine: boolean; hasVoted: boolean }>>;
 
   /**
+   * The record of a finished event, for a visitor with no attendee identity.
+   *
+   * Separate from findVisibleForAttendee rather than that method with a null
+   * attendee, because the two answer different questions. That one includes the
+   * caller's own unmoderated questions and their vote state; this one has no
+   * caller, so it returns strictly what the room could already see and nothing
+   * per-person at all. Collapsing them would put a nullable attendee id in the
+   * middle of the query that decides whether an unapproved question is exposed.
+   *
+   * Ordered by rank rather than recency: what a late visitor wants from a
+   * finished event is what the room cared about most, not whatever was typed
+   * last.
+   */
+  findPublicArchive(input: {
+    eventId: string;
+    cursor?: string | undefined;
+    limit: number;
+  }): Promise<QuestionPage<QuestionRecord>>;
+
+  /**
    * Records an upvote, atomically with the counter and the score.
    *
    * Idempotent: an attendee who has already voted gets the current state back

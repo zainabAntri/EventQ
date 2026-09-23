@@ -6,6 +6,8 @@ import { QuestionSort, type EventResponse, type QuestionStatsResponse } from '@e
 import { Alert, Button, FormField, Input, Label, LiveRegion, Spinner } from '@/components/ui';
 import { ApiError } from '@/lib/api-client';
 import { getEvent } from '@/lib/api-client/organizer';
+import { EventLifecyclePanel } from './event-lifecycle-panel';
+import { QrCodeCard } from './qr-code-card';
 import { cn } from '@/lib/cn';
 import { AiPanel } from './ai-panel';
 import { QuestionCard } from './question-card';
@@ -96,6 +98,16 @@ export function ModerationConsole({ eventId }: { eventId: string }) {
   return (
     <main id="main" className="mx-auto max-w-4xl px-5 py-8 sm:py-10">
       <EventHeader event={event} />
+
+      {/* Lifecycle and sharing come before the queue: publishing the event and
+          getting the code in front of people is what an organizer does first,
+          and on a phone the queue would otherwise push both off the screen. */}
+      {event ? (
+        <div className="mt-6 grid gap-4">
+          <EventLifecyclePanel event={event} onChanged={setEvent} />
+          <QrCodeCard event={event} />
+        </div>
+      ) : null}
 
       {/* Refreshing the event after the AI switch flips is what makes the
           per-question AI buttons appear and disappear with it. */}
@@ -193,17 +205,13 @@ function EventHeader({ event }: { event: EventResponse | null }) {
         {event ? event.status.toLowerCase() : ' '}
       </p>
 
-      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-3">
+      {/* The join code used to be repeated here. It now lives in the QR card
+          below, at a size somebody can read out across a room, and having it
+          twice on one screen made it ambiguous which one to act on. */}
+      <div className="mt-1">
         <h1 className="text-2xl font-bold tracking-tight text-balance sm:text-3xl">
           {event ? event.title : 'Loading…'}
         </h1>
-
-        {event ? (
-          <p className="text-sm text-[var(--muted)]">
-            Join code{' '}
-            <span className="font-mono font-semibold tracking-widest">{event.joinCode}</span>
-          </p>
-        ) : null}
       </div>
     </header>
   );

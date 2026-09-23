@@ -63,6 +63,9 @@ const CANDIDATE_RECALL_THRESHOLD = 0.2;
  *  question is not something a later one should be flagged against. */
 const LIVE_STATUSES: readonly QuestionStatus[] = ['PENDING', 'APPROVED', 'ANSWERED'];
 
+/** The fixed order of a finished event's public record. */
+const ARCHIVE_SORT = 'rank' as const;
+
 @Injectable()
 export class PrismaAttendeeRepository implements AttendeeRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -278,6 +281,42 @@ export class PrismaQuestionRepository implements QuestionRepository {
       }),
       (row) => row.id,
     );
+  }
+
+  /**
+   * The archive is always ranked, and says so as a constant rather than taking
+   * a sort parameter. A closed event has one meaningful order — what the room
+   * supported — and an endpoint with no caller identity has nobody whose
+   * preference a sort option could belong to.
+   */
+  async findPublicArchive(input: {
+    eventId: string;
+    cursor?: string | undefined;
+    limit: number;
+  }): Promise<QuestionPage<QuestionRecord>> {
+    // Ranked, so a late visitor meets the questions the room cared about most.
+    // Reuses the dashboard's keyset machinery rather than an id cursor: ranked
+    // order and id order are not the same sequence, and an id cursor would skip
+    // rows silently.
+    const definition = sortDefinition(ARCHIVE_SORT);
+    const cursor = input.cursor ? decodeCursor(input.cursor, ARCHIVE_SORT) : null;
+
+    const rows = await this.prisma.question.findMany({
+      where: {
+        eventId: input.eventId,
+        deletedAt: null,
+        // Strictly what the room could already see. There is no caller here, so
+        // there is deliberately no `OR attendeeId = ...` branch — an archive
+        // that could expose one unmoderated question would expose everyone's.
+        status: { in: [...ROOM_VISIBLE_STATUSES] },
+        ...(cursor ? keysetPredicate(definition, cursor) : {}),
+      },
+      select: QUESTION_SELECTION,
+      orderBy: orderByFor(definition),
+      take: input.limit + 1,
+    });
+
+    return toPage(rows, input.limit, toQuestionRecord, (row) => encodeCursor(ARCHIVE_SORT, row));
   }
 
   async castVote(input: {

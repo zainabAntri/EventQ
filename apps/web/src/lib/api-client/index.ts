@@ -65,11 +65,22 @@ export interface RequestOptions<TResponse extends z.ZodType> {
   cookie?: string;
 }
 
+/**
+ * The versioned API root.
+ *
+ * Exported so the few places that need a URL rather than a response — an
+ * <img src>, a download link — build it from the same string every fetch uses,
+ * instead of reassembling the prefix and drifting from it.
+ */
+export function apiBaseUrl(): string {
+  return `${env.NEXT_PUBLIC_API_URL}/api/v1`;
+}
+
 export async function apiRequest<TResponse extends z.ZodType>(
   path: string,
   options: RequestOptions<TResponse>,
 ): Promise<z.infer<TResponse>> {
-  const url = `${env.NEXT_PUBLIC_API_URL}/api/v1${path}`;
+  const url = `${apiBaseUrl()}${path}`;
 
   const method = options.method ?? 'GET';
 

@@ -12,7 +12,14 @@ import {
   Query,
   Res,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOperation,
+  ApiParam,
+  ApiProduces,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import {
   CreateEventRequest,
@@ -185,25 +192,56 @@ export class EventsController {
   @ApiOperation({
     summary: 'QR code for the attendee page',
     description:
-      "An SVG pointing at the event's joinUrl. SVG rather than PNG so it stays sharp printed on a poster or projected on a wall at any size, and so it can be styled by the page that embeds it.",
+      "Encodes the event's joinUrl, tinted with the event's accent colour at a contrast a scanner can actually read. SVG by default, so it stays sharp on a poster or a projector wall; ?format=png for the tools that refuse SVG. ?download=1 sends it as an attachment.",
   })
   @ApiParam({ name: 'eventId', format: 'uuid' })
-  @ApiProduces('image/svg+xml')
-  @ApiResponse({ status: 200, description: 'The QR code as an SVG document.' })
+  @ApiQuery({ name: 'format', required: false, enum: ['svg', 'png'] })
+  @ApiQuery({
+    name: 'download',
+    required: false,
+    description: 'Any truthy value sends Content-Disposition: attachment.',
+  })
+  @ApiProduces('image/svg+xml', 'image/png')
+  @ApiResponse({ status: 200, description: 'The QR code.' })
+  /**
+   * `@Res()` WITHOUT passthrough, deliberately.
+   *
+   * With passthrough, Nest sends the returned value itself — and its Express
+   * adapter serialises anything that is not a string with `res.json()`. A PNG
+   * Buffer therefore went out as `{"type":"Buffer","data":[...]}` with an
+   * `image/png` header on it: a 200 response that every client would fail to
+   * render, and which no status-code assertion would ever catch.
+   *
+   * Owning the response means the bytes are written exactly as produced. Thrown
+   * errors still reach the global exception filter, which is what keeps the
+   * 404 for another organization's event intact.
+   */
   async qrCode(
     @Param('eventId', new ParseUUIDPipe({ version: '7' })) eventId: string,
     @Ctx() context: RequestContext,
-    @Res({ passthrough: true }) response: Response,
-  ): Promise<string> {
-    const svg = await this.getQrCode.execute(eventId, context);
+    @Res() response: Response,
+    @Query('format') format?: string,
+    @Query('download') download?: string,
+  ): Promise<void> {
+    // An unrecognised format falls back to SVG rather than erroring. This is an
+    // image in an <img> tag; a 400 here would render as a broken icon on the
+    // dashboard with nothing to explain it.
+    const image = await this.getQrCode.execute(eventId, context, format === 'png' ? 'png' : 'svg');
 
-    response.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    response.setHeader('Content-Type', image.contentType);
     // Never cached by a shared proxy: the URL it encodes is only as private as
     // the event itself, and an organizer revoking access should not be undone
     // by a CDN still serving the old image.
     response.setHeader('Cache-Control', 'private, max-age=300');
 
-    return svg;
+    if (download) {
+      // The filename is built from the join code, which is drawn from a
+      // restricted alphabet — no quotes, no path separators, nothing that could
+      // break out of the header.
+      response.setHeader('Content-Disposition', `attachment; filename="${image.filename}"`);
+    }
+
+    response.send(image.body);
   }
 
   @Delete(':eventId')

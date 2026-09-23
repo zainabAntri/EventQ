@@ -52,6 +52,7 @@ export interface EventRecord {
   startsAt: Date | null;
   endsAt: Date | null;
   timezone: string;
+  accentColor: string | null;
   isPubliclyListed: boolean;
   publishedAt: Date | null;
   closedAt: Date | null;
@@ -75,6 +76,7 @@ export interface CreateEventData {
   startsAt?: Date | undefined;
   endsAt?: Date | undefined;
   timezone?: string | undefined;
+  accentColor?: string | undefined;
   settings?: EventSettingsPatch | undefined;
   isPubliclyListed?: boolean | undefined;
 }
@@ -93,6 +95,7 @@ export interface UpdateEventData {
   startsAt?: Date | null | undefined;
   endsAt?: Date | null | undefined;
   timezone?: string | undefined;
+  accentColor?: string | null | undefined;
   settings?: EventSettingsPatch | undefined;
   isPubliclyListed?: boolean | undefined;
 }

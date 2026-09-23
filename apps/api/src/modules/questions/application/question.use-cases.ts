@@ -17,7 +17,7 @@ import type {
 // Pure domain rules from the events module. Imported rather than restated:
 // duplicating "which events are publicly reachable" is how two answers to one
 // question eventually disagree, and this is the answer an attacker probes.
-import { isPubliclyVisible } from '../../events/domain/event-lifecycle';
+import { publicVisibility } from '../../events/domain/event-lifecycle';
 import { EventNotFoundError } from '../../events/domain/event.errors';
 import type { RequestContext } from '../../../shared/auth/request-context';
 import {
@@ -128,10 +128,20 @@ export class JoinEventUseCase {
   private async requireJoinableEvent(joinCode: string): Promise<EventSubmissionPolicy> {
     const policy = await this.policies.findByJoinCode(joinCode);
 
-    // Unknown code, draft, closed, archived and PRIVATE all produce one
-    // identical 404. Any distinction would let someone probe for valid codes or
-    // learn an event exists before its organizer chose to reveal it.
-    if (!policy || !isPubliclyVisible(policy.status, policy.accessMode)) {
+    // Joining requires an OPEN event, not merely a visible one.
+    //
+    // A closed event is readable through the archive endpoint, but minting an
+    // attendee for it would create a row — and the retention clock that comes
+    // with it — for somebody who can no longer take part. Reading a finished
+    // event's record needs no identity, so none is issued.
+    if (
+      !policy ||
+      publicVisibility({
+        status: policy.status,
+        accessMode: policy.accessMode,
+        publishedAt: policy.publishedAt,
+      }) !== 'open'
+    ) {
       throw new EventNotFoundError();
     }
 
@@ -293,6 +303,61 @@ export class SubmitQuestionUseCase {
     if (!decision.allowed) {
       throw new SubmissionLimitReachedError(decision.retryAfterSeconds, policy.submitLimitCount);
     }
+  }
+}
+
+/**
+ * The public record of a finished event.
+ *
+ * Unauthenticated, with no attendee token and therefore no identity: this is
+ * the page someone reaches by scanning a poster after the event, which is the
+ * most common late scan there is.
+ *
+ * Only a CLOSED event answers here. A published one is refused rather than
+ * served, because it has a live board with vote state and its own moderation
+ * rules, and a second, identity-free way to read the same questions would be a
+ * way to read them without any of that.
+ */
+@Injectable()
+export class ListEventArchiveUseCase {
+  constructor(
+    @Inject(EVENT_POLICY_READER) private readonly policies: EventPolicyReader,
+    @Inject(QUESTION_REPOSITORY) private readonly questions: QuestionRepository,
+  ) {}
+
+  async execute(input: {
+    joinCode: string;
+    query: CursorPaginationQuery;
+  }): Promise<PublicQuestionListResponse> {
+    const policy = await this.policies.findByJoinCode(input.joinCode);
+
+    if (
+      !policy ||
+      publicVisibility({
+        status: policy.status,
+        accessMode: policy.accessMode,
+        publishedAt: policy.publishedAt,
+      }) !== 'closed'
+    ) {
+      throw new EventNotFoundError();
+    }
+
+    const page = await this.questions.findPublicArchive({
+      eventId: policy.eventId,
+      cursor: input.query.cursor,
+      limit: input.query.limit,
+    });
+
+    return {
+      items: page.items.map((item) =>
+        // Nobody is asking, so nothing is theirs and nothing is voted. Stated
+        // here rather than left to the mapper's defaults, so the absence of an
+        // identity is visible at the call site instead of implied.
+        toPublicQuestionResponse({ ...item, isMine: false, hasVoted: false }, policy),
+      ),
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+    };
   }
 }
 

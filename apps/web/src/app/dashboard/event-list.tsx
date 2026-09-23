@@ -4,16 +4,18 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { AuthenticatedOrganizer, EventResponse } from '@eventq/contracts';
-import { Alert, Button, Spinner } from '@/components/ui';
+import { Alert, Button, Spinner, buttonVariants } from '@/components/ui';
 import { ApiError } from '@/lib/api-client';
 import { getCurrentOrganizer, listEvents, signOut } from '@/lib/api-client/organizer';
 
 /**
- * The events an organizer can moderate.
+ * The events an organizer can moderate, and the way in to creating one.
  *
- * Deliberately thin: creating and configuring events already has an API, but no
- * screen, and building one here would be a second feature wearing this phase's
- * name. This lists what exists and gets someone into a console.
+ * The empty state carries its own call to action rather than only explaining
+ * that there is nothing here. A first-time organizer arrives on this screen
+ * with no events by definition, so "you have no events" without a next step is
+ * a dead end at exactly the moment someone is deciding whether the product
+ * works.
  */
 export function EventList() {
   const router = useRouter();
@@ -62,18 +64,27 @@ export function EventList() {
           ) : null}
         </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            // Navigate regardless of the outcome: the API clears the cookies
-            // even for an already-expired session, and a failure here must not
-            // leave someone stuck on a page they meant to leave.
-            void signOut().finally(() => router.replace('/sign-in'));
-          }}
-        >
-          Sign out
-        </Button>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/dashboard/events/new"
+            className={buttonVariants({ size: 'sm', variant: 'primary' })}
+          >
+            New event
+          </Link>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              // Navigate regardless of the outcome: the API clears the cookies
+              // even for an already-expired session, and a failure here must not
+              // leave someone stuck on a page they meant to leave.
+              void signOut().finally(() => router.replace('/sign-in'));
+            }}
+          >
+            Sign out
+          </Button>
+        </div>
       </div>
 
       {error ? (
@@ -91,7 +102,15 @@ export function EventList() {
       ) : null}
 
       {events?.length === 0 ? (
-        <p className="mt-10 text-center text-sm text-[var(--muted)]">You have no events yet.</p>
+        <div className="mt-10 text-center">
+          <p className="text-sm text-[var(--muted)]">You have no events yet.</p>
+          <Link
+            href="/dashboard/events/new"
+            className={`${buttonVariants({ variant: 'primary' })} mt-4`}
+          >
+            Create your first event
+          </Link>
+        </div>
       ) : null}
 
       {events && events.length > 0 ? (

@@ -59,6 +59,14 @@ vi.mock('@/lib/api-client/organizer', () => ({
   runCluster: vi.fn(),
   runSummary: vi.fn(),
   updateEvent: vi.fn(),
+  // The lifecycle and QR panels live on this screen too. A factory mock
+  // replaces the WHOLE module, so anything the console renders must be listed
+  // here or it arrives as undefined and the render throws.
+  publishEvent: vi.fn(),
+  unpublishEvent: vi.fn(),
+  closeEvent: vi.fn(),
+  createEvent: vi.fn(),
+  eventQrCodeUrl: vi.fn(() => 'https://api.test/api/v1/events/e1/qr'),
 }));
 
 vi.mock('next/navigation', () => ({

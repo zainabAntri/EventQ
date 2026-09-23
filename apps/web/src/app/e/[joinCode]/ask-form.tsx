@@ -183,7 +183,11 @@ export function AskForm({ joinCode }: { joinCode: string }) {
         loadingLabel="Sending your question"
         // 48px tall and full width: this is pressed one-handed, standing up, in
         // a dim room, by someone who is also listening to a speaker.
-        className="h-14 text-base"
+        //
+        // The branded fill and its text colour come from the same corrected
+        // palette, so the primary action of the whole product cannot end up
+        // with an unreadable label whatever colour the organizer chose.
+        className="h-14 bg-[var(--event-accent-fill,var(--color-brand-600))] text-base text-[var(--event-on-accent,#fff)] hover:opacity-90"
       >
         Send question
       </Button>

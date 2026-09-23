@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AccentColor } from './branding.js';
 import { EntityId, JoinCode } from './primitives.js';
 import {
   AttendeeIdentityMode,
@@ -66,6 +67,11 @@ const eventWritableFields = {
   startsAt: z.iso.datetime({ offset: true }).optional(),
   endsAt: z.iso.datetime({ offset: true }).optional(),
   timezone: Timezone.optional(),
+  /** Brand colour for the attendee page, the closed screen and the printed
+   *  poster. Stored exactly as chosen; every contrast-sensitive use of it is
+   *  derived at render time by `brandPalette`, so no colour an organizer picks
+   *  can push a surface below WCAG AA. */
+  accentColor: AccentColor.optional(),
   settings: EventSettingsInput.optional(),
 };
 
@@ -101,6 +107,8 @@ export const UpdateEventRequest = z
     startsAt: z.iso.datetime({ offset: true }).nullable().optional(),
     endsAt: z.iso.datetime({ offset: true }).nullable().optional(),
     timezone: Timezone.optional(),
+    /** `null` clears the branding and restores the default accent. */
+    accentColor: AccentColor.nullable().optional(),
     settings: EventSettingsInput.optional(),
   })
   .superRefine((value, ctx) => {
@@ -144,6 +152,7 @@ export const EventResponse = z.object({
    */
   joinUrl: z.url(),
   slug: z.string(),
+  accentColor: AccentColor.nullable(),
   startsAt: z.iso.datetime().nullable(),
   endsAt: z.iso.datetime().nullable(),
   timezone: z.string(),
@@ -155,6 +164,16 @@ export const EventResponse = z.object({
   updatedAt: z.iso.datetime(),
 });
 export type EventResponse = z.infer<typeof EventResponse>;
+
+/**
+ * What an attendee is allowed to learn about an event's lifecycle.
+ *
+ * A published event is open for questions; a closed one is readable but takes
+ * no more input. Every other state — draft, archived, private — remains a 404,
+ * so this enum is the exhaustive list of what a public response may admit to.
+ */
+export const PublicEventStatus = z.enum(['PUBLISHED', 'CLOSED']);
+export type PublicEventStatus = z.infer<typeof PublicEventStatus>;
 
 /**
  * The attendee's view, reachable without authentication.
@@ -169,6 +188,19 @@ export const PublicEventResponse = z.object({
   venue: z.string().nullable(),
   type: EventType,
   joinCode: JoinCode,
+  /**
+   * The only two lifecycle states an attendee can observe.
+   *
+   * A narrow enum rather than the full EventStatus, because the difference
+   * matters: DRAFT, ARCHIVED and PRIVATE are still answered with an
+   * indistinguishable 404, and typing this field as EventStatus would invite a
+   * future change that quietly starts returning one of them.
+   */
+  status: PublicEventStatus,
+  /** Set only once the event has closed. Drives the "this finished" wording. */
+  closedAt: z.iso.datetime().nullable(),
+  /** The organizer's brand colour, or null for the product default. */
+  accentColor: AccentColor.nullable(),
   startsAt: z.iso.datetime().nullable(),
   endsAt: z.iso.datetime().nullable(),
   timezone: z.string(),

@@ -23,6 +23,9 @@ export interface EventSubmissionPolicy {
   eventId: string;
   status: EventStatus;
   accessMode: EventAccessMode;
+  /** Needed to tell a closed event that really ran from one that reached
+   *  CLOSED without ever being published. Only the former is disclosed. */
+  publishedAt: Date | null;
 
   moderationMode: ModerationMode;
   attendeeIdentityMode: AttendeeIdentityMode;
