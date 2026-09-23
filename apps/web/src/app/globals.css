@@ -48,6 +48,20 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* The options of a native <select>, painted explicitly.
+
+   `color-scheme` above is a HINT, and Chrome on Windows does not take it for
+   the dropdown list: it paints each option with the option's own background.
+   Our selects use `bg-transparent`, so that background was transparent, the
+   browser fell back to white, and the options inherited the dark theme's
+   near-white text — white on white, readable only on the highlighted row.
+   Naming both colours here leaves nothing for the browser to guess, and does
+   it once for every <select> in the app. */
+option {
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
 /* WCAG 2.2: focus must be clearly visible for keyboard users. The moderation
    queue is designed to be driven entirely from the keyboard, so this is a
    functional requirement rather than a nicety. */
