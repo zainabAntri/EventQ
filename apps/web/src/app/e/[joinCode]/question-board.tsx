@@ -241,7 +241,7 @@ function BoardItem({
     <li
       className={cn(
         'flex gap-3 rounded-lg border border-[var(--border,#e5e5e5)] p-4',
-        question.isMine && 'border-brand-500/40',
+        question.isMine && 'border-[var(--event-accent-fill,var(--color-brand-500))]/40',
       )}
     >
       <div className="min-w-0 flex-1">
@@ -272,8 +272,12 @@ function BoardItem({
             // dim room. Smaller targets are how people vote for the wrong one.
             'flex min-h-12 min-w-14 shrink-0 flex-col items-center justify-center rounded-lg border px-2 text-sm font-semibold tabular-nums transition-colors',
             'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500',
+            // Branded through variables rather than fixed brand classes, so an
+            // event's accent reaches the control the room actually presses.
+            // Both colours come from the same corrected palette, so a voted
+            // button can never end up with unreadable digits on it.
             question.hasVoted
-              ? 'border-brand-600 bg-brand-600 text-white'
+              ? 'border-[var(--event-accent-fill,var(--color-brand-600))] bg-[var(--event-accent-fill,var(--color-brand-600))] text-[var(--event-on-accent,#fff)]'
               : 'border-[var(--border,#e5e5e5)] hover:bg-current/5',
             isBusy && 'opacity-60',
           )}

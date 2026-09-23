@@ -8,6 +8,7 @@ import {
   GetQuestionStatsUseCase,
   JoinEventUseCase,
   ListModerationQueueUseCase,
+  ListEventArchiveUseCase,
   ListPublicQuestionsUseCase,
   MergeQuestionUseCase,
   ModerateQuestionUseCase,
@@ -43,6 +44,7 @@ import { ATTENDEE_TOKENS } from './domain/attendee-tokens.port';
     // Application
     JoinEventUseCase,
     SubmitQuestionUseCase,
+    ListEventArchiveUseCase,
     ListPublicQuestionsUseCase,
     ListModerationQueueUseCase,
     GetQuestionStatsUseCase,

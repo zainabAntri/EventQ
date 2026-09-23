@@ -33,12 +33,59 @@ export function allowedTransitions(from: EventStatus): readonly EventStatus[] {
 }
 
 /**
- * Whether an unauthenticated visitor may see this event through its public
- * identifier. Only PUBLISHED qualifies: a draft is unfinished and a closed
- * event should stop accepting traffic.
+ * What an unauthenticated visitor is allowed to learn from a join code.
+ *
+ * `'open'`   — the event page, accepting questions.
+ * `'closed'` — the event took place and has finished. Readable, not writable.
+ * `'hidden'` — an indistinguishable 404.
+ *
+ * ## Why `closed` is disclosed and the others are not
+ *
+ * Every state used to collapse into one 404 so that nobody could probe for
+ * valid join codes. That protected a real thing, but it also meant a poster on
+ * a wall became a dead end the moment the event ended, which is the most
+ * common scan there is — people photograph the code and open it on the train
+ * home.
+ *
+ * The disclosure is therefore narrowed to the case where the code was never a
+ * secret in the first place. A PUBLISHED-then-CLOSED public event had its join
+ * code displayed on a screen to a whole room and printed on posters; confirming
+ * it existed tells an attacker nothing the venue did not already tell everyone
+ * in it.
+ *
+ * The states that stay hidden are the ones where the code has *not* been
+ * broadcast: a DRAFT nobody has seen, an ARCHIVED event past its retention, and
+ * any PRIVATE event whose organizer explicitly chose that it not be findable.
+ * `publishedAt` is required rather than inferred from the status, so an event
+ * that somehow reached CLOSED without ever being published stays hidden too.
+ *
+ * Probing for valid codes is still answered by the rate limiter, which is where
+ * that defence belongs — a 404 was never going to stop an attacker willing to
+ * make 36^8 requests.
  */
-export function isPubliclyVisible(status: EventStatus, accessMode: 'PUBLIC' | 'PRIVATE'): boolean {
-  return status === 'PUBLISHED' && accessMode === 'PUBLIC';
+export type PublicVisibility = 'open' | 'closed' | 'hidden';
+
+export function publicVisibility(input: {
+  status: EventStatus;
+  accessMode: 'PUBLIC' | 'PRIVATE';
+  publishedAt: Date | null;
+}): PublicVisibility {
+  if (input.accessMode !== 'PUBLIC') return 'hidden';
+  if (input.status === 'PUBLISHED') return 'open';
+  if (input.status === 'CLOSED' && input.publishedAt !== null) return 'closed';
+
+  return 'hidden';
+}
+
+/**
+ * Whether the event accepts new questions and votes.
+ *
+ * Separate from `publicVisibility` on purpose: a closed event is still
+ * readable, and every write path must consult this rather than assuming that
+ * "the attendee could load the page" implies "the attendee may post".
+ */
+export function acceptsParticipation(status: EventStatus): boolean {
+  return status === 'PUBLISHED';
 }
 
 /** Editable content is frozen once an event closes, so the record of what took

@@ -87,6 +87,7 @@ export class PrismaEventRepository implements EventRepository {
         startsAt: data.startsAt ?? null,
         endsAt: data.endsAt ?? null,
         ...(data.timezone ? { timezone: data.timezone } : {}),
+        ...(data.accentColor ? { accentColor: data.accentColor } : {}),
         ...(data.isPubliclyListed !== undefined ? { isPubliclyListed: data.isPubliclyListed } : {}),
         // Settings are created alongside the event, so an event always has
         // them and no read has to cope with a missing row.
@@ -112,6 +113,9 @@ export class PrismaEventRepository implements EventRepository {
         ...(data.startsAt !== undefined ? { startsAt: data.startsAt } : {}),
         ...(data.endsAt !== undefined ? { endsAt: data.endsAt } : {}),
         ...(data.timezone !== undefined ? { timezone: data.timezone } : {}),
+        // null is a real value here: it clears the branding back to the
+        // product default, which is why the undefined check is explicit.
+        ...(data.accentColor !== undefined ? { accentColor: data.accentColor } : {}),
         ...(data.isPubliclyListed !== undefined ? { isPubliclyListed: data.isPubliclyListed } : {}),
         ...(data.settings ? { settings: { update: settingsUpdate(data.settings) } } : {}),
       },
@@ -209,6 +213,7 @@ interface EventRow {
   startsAt: Date | null;
   endsAt: Date | null;
   timezone: string;
+  accentColor: string | null;
   isPubliclyListed: boolean;
   publishedAt: Date | null;
   closedAt: Date | null;
@@ -238,6 +243,7 @@ function toRecord(event: EventRow): EventRecord {
     startsAt: event.startsAt,
     endsAt: event.endsAt,
     timezone: event.timezone,
+    accentColor: event.accentColor,
     isPubliclyListed: event.isPubliclyListed,
     publishedAt: event.publishedAt,
     closedAt: event.closedAt,

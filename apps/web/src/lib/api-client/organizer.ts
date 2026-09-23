@@ -14,12 +14,13 @@ import {
   ModerationQueueResponse,
   QuestionResponse,
   QuestionStatsResponse,
+  type CreateEventRequest,
   type LoginRequest,
   type ModerationQueueQuery,
   type UpdateEventRequest,
   type QuestionModerationAction,
 } from '@eventq/contracts';
-import { apiRequest } from './index';
+import { apiBaseUrl, apiRequest } from './index';
 
 /**
  * The organizer surface, typed from the shared contract.
@@ -67,6 +68,59 @@ export function getEvent(eventId: string, signal?: AbortSignal): Promise<EventRe
     schema: EventResponse,
     ...(signal ? { signal } : {}),
   });
+}
+
+export function createEvent(body: CreateEventRequest): Promise<EventResponse> {
+  return apiRequest('/events', { method: 'POST', body, schema: EventResponse });
+}
+
+/**
+ * Lifecycle transitions.
+ *
+ * Each is its own endpoint rather than a PATCH of `status`, and the client
+ * mirrors that: the server decides whether a transition is legal from where the
+ * event actually is, so there is no status for the dashboard to send and no way
+ * for it to ask for an illegal one.
+ */
+export function publishEvent(eventId: string): Promise<EventResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/publish`, {
+    method: 'POST',
+    schema: EventResponse,
+  });
+}
+
+export function unpublishEvent(eventId: string): Promise<EventResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/unpublish`, {
+    method: 'POST',
+    schema: EventResponse,
+  });
+}
+
+export function closeEvent(eventId: string): Promise<EventResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/close`, {
+    method: 'POST',
+    schema: EventResponse,
+  });
+}
+
+/**
+ * The QR endpoint's URL, for an <img> or a download link.
+ *
+ * A URL rather than a fetch: the browser is better at loading and caching an
+ * image than we are, and an <img src> carries the session cookie on a same-site
+ * request without any of this code touching the bytes. Building it here keeps
+ * the route in one place, next to every other endpoint.
+ */
+export function eventQrCodeUrl(
+  eventId: string,
+  options: { format?: 'svg' | 'png'; download?: boolean } = {},
+): string {
+  const params = new URLSearchParams();
+  if (options.format) params.set('format', options.format);
+  if (options.download) params.set('download', '1');
+
+  const search = params.toString();
+  return `${apiBaseUrl()}/events/${encodeURIComponent(eventId)}/qr${search ? `?${search}` : ''}`;
 }
 
 /**

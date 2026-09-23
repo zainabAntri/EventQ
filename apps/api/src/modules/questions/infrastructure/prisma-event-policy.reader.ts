@@ -32,6 +32,7 @@ export class PrismaEventPolicyReader implements EventPolicyReader {
 const SELECTION = {
   id: true,
   status: true,
+  publishedAt: true,
   settings: {
     select: {
       accessMode: true,
@@ -51,6 +52,7 @@ const SELECTION = {
 interface EventPolicyRow {
   id: string;
   status: string;
+  publishedAt: Date | null;
   settings: {
     accessMode: string;
     moderationMode: string;
@@ -79,6 +81,7 @@ function toPolicy(event: EventPolicyRow): EventSubmissionPolicy {
   return {
     eventId: event.id,
     status: event.status as EventSubmissionPolicy['status'],
+    publishedAt: event.publishedAt,
     accessMode: (settings?.accessMode ?? 'PUBLIC') as EventSubmissionPolicy['accessMode'],
     moderationMode: (settings?.moderationMode ?? 'PRE') as EventSubmissionPolicy['moderationMode'],
     attendeeIdentityMode: (settings?.attendeeIdentityMode ??

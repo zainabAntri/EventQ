@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acceptsParticipation,
   allowedTransitions,
   canTransition,
   canUnpublish,
   isEditable,
-  isPubliclyVisible,
+  publicVisibility,
   resolveDeletion,
 } from './event-lifecycle';
 
@@ -44,20 +45,78 @@ describe('event lifecycle', () => {
   });
 
   describe('public visibility', () => {
-    it('shows only a published, public event', () => {
-      expect(isPubliclyVisible('PUBLISHED', 'PUBLIC')).toBe(true);
+    const PUBLISHED_AT = new Date('2026-09-01T10:00:00Z');
+
+    it('opens a published, public event', () => {
+      expect(
+        publicVisibility({ status: 'PUBLISHED', accessMode: 'PUBLIC', publishedAt: PUBLISHED_AT }),
+      ).toBe('open');
     });
 
-    it('hides drafts, closed and archived events', () => {
-      for (const status of ['DRAFT', 'CLOSED', 'ARCHIVED'] as const) {
-        expect(isPubliclyVisible(status, 'PUBLIC')).toBe(false);
+    it('discloses a public event that ran and has since closed', () => {
+      // The join code was on a screen in front of a whole room and printed on
+      // posters. Confirming the event existed tells an attacker nothing the
+      // venue did not already tell everyone in it, and it is what lets a poster
+      // scanned on the way home say something useful.
+      expect(
+        publicVisibility({ status: 'CLOSED', accessMode: 'PUBLIC', publishedAt: PUBLISHED_AT }),
+      ).toBe('closed');
+    });
+
+    it('hides a closed event that was never published', () => {
+      // No broadcast ever happened, so the code is still a secret. Inferring
+      // "it ran" from the status alone would leak exactly the events nobody
+      // was shown.
+      expect(publicVisibility({ status: 'CLOSED', accessMode: 'PUBLIC', publishedAt: null })).toBe(
+        'hidden',
+      );
+    });
+
+    it('hides drafts and archived events', () => {
+      for (const status of ['DRAFT', 'ARCHIVED'] as const) {
+        expect(publicVisibility({ status, accessMode: 'PUBLIC', publishedAt: null })).toBe(
+          'hidden',
+        );
+        // Even with a publish in their history: an archived event is past its
+        // retention, and a draft that was once live has been withdrawn.
+        expect(publicVisibility({ status, accessMode: 'PUBLIC', publishedAt: PUBLISHED_AT })).toBe(
+          'hidden',
+        );
       }
     });
 
-    it('hides a private event even when published', () => {
-      // Access mode is an independent axis from status: publishing makes an
-      // event ready, not necessarily open to the world.
-      expect(isPubliclyVisible('PUBLISHED', 'PRIVATE')).toBe(false);
+    it('hides a private event in every status', () => {
+      // Access mode is an independent axis from status, and it is the
+      // organizer's explicit choice that the event not be findable. It
+      // therefore overrides the closed-event disclosure entirely.
+      for (const status of ['DRAFT', 'PUBLISHED', 'CLOSED', 'ARCHIVED'] as const) {
+        expect(publicVisibility({ status, accessMode: 'PRIVATE', publishedAt: PUBLISHED_AT })).toBe(
+          'hidden',
+        );
+      }
+    });
+  });
+
+  describe('participation', () => {
+    it('accepts questions only while published', () => {
+      expect(acceptsParticipation('PUBLISHED')).toBe(true);
+    });
+
+    it('refuses participation in a closed event even though it is readable', () => {
+      // The split that makes the archive safe: visible does not imply writable.
+      expect(
+        publicVisibility({
+          status: 'CLOSED',
+          accessMode: 'PUBLIC',
+          publishedAt: new Date('2026-09-01T10:00:00Z'),
+        }),
+      ).toBe('closed');
+      expect(acceptsParticipation('CLOSED')).toBe(false);
+    });
+
+    it('refuses participation in drafts and archived events', () => {
+      expect(acceptsParticipation('DRAFT')).toBe(false);
+      expect(acceptsParticipation('ARCHIVED')).toBe(false);
     });
   });
 

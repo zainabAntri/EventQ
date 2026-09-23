@@ -57,6 +57,24 @@ body {
   border-radius: 2px;
 }
 
+/**
+ * Per-event branding.
+ *
+ * EventBranding sets --event-accent-text (legible on white) and
+ * --event-accent-text-dark (legible on near-black) as inline custom properties.
+ * An inline style cannot answer a media query, so the choice between them is
+ * made here and read as --event-accent-ink by everything downstream.
+ */
+.event-branding {
+  --event-accent-ink: var(--event-accent-text, var(--color-brand-600));
+}
+
+@media (prefers-color-scheme: dark) {
+  .event-branding {
+    --event-accent-ink: var(--event-accent-text-dark, var(--color-brand-300));
+  }
+}
+
 /* Respect the user's motion preference rather than assuming everyone wants
    the live question feed animating. */
 @media (prefers-reduced-motion: reduce) {

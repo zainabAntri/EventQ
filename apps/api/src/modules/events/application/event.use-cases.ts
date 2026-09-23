@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { toString as renderQrCode } from 'qrcode';
+import { toBuffer as renderQrCodeBuffer, toString as renderQrCode } from 'qrcode';
+import { DEFAULT_ACCENT_COLOR, accentAsText, normalizeAccentColor } from '@eventq/contracts';
 import type {
   CreateEventRequest,
   DeleteEventResponse,
@@ -33,7 +34,7 @@ import {
   canTransition,
   canUnpublish,
   isEditable,
-  isPubliclyVisible,
+  publicVisibility,
   resolveDeletion,
 } from '../domain/event-lifecycle';
 import { generateJoinCode, joinUrlFor, slugifyTitle } from '../domain/join-code';
@@ -83,11 +84,45 @@ export class GetEventUseCase {
  * this is a pure, deterministic transformation of a string. A port would be
  * ceremony with nothing behind it.
  *
- * SVG rather than PNG, because this ends up printed on A3 posters and thrown at
- * projector walls. A raster image has to guess a resolution and will be wrong
- * for one of those; vectors are sharp at every size and are a fraction of the
+ * ## Two formats, for two genuinely different jobs
+ *
+ * SVG is the default and what the dashboard and the print page embed: it stays
+ * sharp on an A3 poster and on a projector wall, and it is a fraction of the
  * bytes.
+ *
+ * PNG exists because SVG is not universally accepted where these codes
+ * actually end up — slide decks, printers' portals and social tools routinely
+ * refuse it. An organizer who cannot get the code into their deck will
+ * screenshot it at whatever resolution their screen happens to be, which is how
+ * a QR ends up too blurry to scan from the third row.
+ *
+ * ## Why the brand colour is corrected before it reaches the code
+ *
+ * A QR scanner needs contrast between the dark modules and the light ones. An
+ * organizer who picks a pale brand colour would otherwise produce a code that
+ * looks right on screen and cannot be read by a phone camera in a dim venue —
+ * discovered, at the earliest, when 200 people are pointing phones at it.
+ *
+ * So the accent is pushed to at least 7:1 against white (AAA, deliberately
+ * beyond the 4.5:1 used for text) before it is used. The hue survives; the
+ * legibility is not negotiable.
  */
+export type QrCodeFormat = 'svg' | 'png';
+
+export interface QrCodeImage {
+  body: string | Buffer;
+  contentType: string;
+  /** Suggested download name, derived from the join code so several events'
+   *  codes do not all land in a folder called `qr.png`. */
+  filename: string;
+}
+
+/** Comfortably past what a phone camera resolves, and still a small file. */
+const QR_PNG_WIDTH = 1024;
+
+/** AAA, not AA. A scanner is less forgiving than an eye. */
+const QR_MINIMUM_CONTRAST = 7;
+
 @Injectable()
 export class GetEventQrCodeUseCase {
   constructor(
@@ -95,21 +130,47 @@ export class GetEventQrCodeUseCase {
     private readonly config: AppConfigService,
   ) {}
 
-  async execute(eventId: string, context: RequestContext): Promise<string> {
+  async execute(
+    eventId: string,
+    context: RequestContext,
+    format: QrCodeFormat = 'svg',
+  ): Promise<QrCodeImage> {
     // Goes through the same org-scoped lookup as every other read, so an event
     // belonging to another organization is a 404 here too. A QR endpoint that
     // skipped that check would happily render a code for someone else's event.
     const event = await this.find.execute(eventId, context);
 
-    return renderQrCode(joinUrlFor(this.config.http.webOrigin, event.joinCode), {
-      type: 'svg',
+    const url = joinUrlFor(this.config.http.webOrigin, event.joinCode);
+    const options = {
       // Medium error correction. A QR on a poster gets scuffed, partly covered
       // and photographed at an angle; 'L' would fail in a real room, and 'H'
       // would make the code denser than a phone camera can resolve from the
       // back row for no benefit at this payload size.
-      errorCorrectionLevel: 'M',
+      errorCorrectionLevel: 'M' as const,
       margin: 2,
-    });
+      color: {
+        dark: accentAsText(
+          event.accentColor ?? DEFAULT_ACCENT_COLOR,
+          '#ffffff',
+          QR_MINIMUM_CONTRAST,
+        ),
+        light: '#ffffff',
+      },
+    };
+
+    if (format === 'png') {
+      return {
+        body: await renderQrCodeBuffer(url, { ...options, type: 'png', width: QR_PNG_WIDTH }),
+        contentType: 'image/png',
+        filename: `eventq-${event.joinCode.toLowerCase()}.png`,
+      };
+    }
+
+    return {
+      body: await renderQrCode(url, { ...options, type: 'svg' }),
+      contentType: 'image/svg+xml; charset=utf-8',
+      filename: `eventq-${event.joinCode.toLowerCase()}.svg`,
+    };
   }
 }
 
@@ -160,6 +221,9 @@ export class CreateEventUseCase {
       startsAt: request.startsAt ? new Date(request.startsAt) : undefined,
       endsAt: request.endsAt ? new Date(request.endsAt) : undefined,
       timezone: request.timezone,
+      // Folded here rather than in the schema: a zod transform cannot be
+      // expressed in the OpenAPI document this package generates.
+      accentColor: request.accentColor ? normalizeAccentColor(request.accentColor) : undefined,
       settings: request.settings,
       isPubliclyListed: request.settings?.isPubliclyListed,
       ...(await this.allocateIdentifiers(context.orgId, request.title)),
@@ -232,6 +296,12 @@ export class UpdateEventUseCase {
       startsAt: request.startsAt === undefined ? undefined : nextStart,
       endsAt: request.endsAt === undefined ? undefined : nextEnd,
       timezone: request.timezone,
+      // undefined leaves it alone, null clears it, a string is folded. All
+      // three are distinct and none may collapse into another.
+      accentColor:
+        request.accentColor == null
+          ? request.accentColor
+          : normalizeAccentColor(request.accentColor),
       settings: request.settings,
       isPubliclyListed: request.settings?.isPubliclyListed,
     };
@@ -335,14 +405,21 @@ export class GetPublicEventUseCase {
   async execute(joinCode: string): Promise<PublicEventResponse> {
     const event = await this.events.findByJoinCode(joinCode);
 
-    // Unknown code, draft, closed, archived and PRIVATE all produce the same
-    // 404. Any distinction would let someone probe for valid codes or learn
-    // that an event exists before its organizer chose to reveal it.
-    if (!event || !isPubliclyVisible(event.status, event.settings.accessMode)) {
-      throw new EventNotFoundError();
-    }
+    // Draft, archived and PRIVATE remain an indistinguishable 404. A public
+    // event that ran and has since closed is disclosed, because its join code
+    // was displayed to a whole room and printed on posters — see
+    // publicVisibility for the full reasoning.
+    const visibility = event
+      ? publicVisibility({
+          status: event.status,
+          accessMode: event.settings.accessMode,
+          publishedAt: event.publishedAt,
+        })
+      : 'hidden';
 
-    return toPublicEventResponse(event);
+    if (!event || visibility === 'hidden') throw new EventNotFoundError();
+
+    return toPublicEventResponse(event, visibility);
   }
 }
 

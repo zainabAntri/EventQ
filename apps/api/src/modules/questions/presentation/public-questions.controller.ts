@@ -52,6 +52,7 @@ import {
 } from '../domain/attendee-tokens.port';
 import {
   JoinEventUseCase,
+  ListEventArchiveUseCase,
   ListPublicQuestionsUseCase,
   SubmitQuestionUseCase,
   VoteOnQuestionUseCase,
@@ -88,6 +89,7 @@ export class PublicQuestionsController {
     private readonly joinEvent: JoinEventUseCase,
     private readonly submitQuestion: SubmitQuestionUseCase,
     private readonly listQuestions: ListPublicQuestionsUseCase,
+    private readonly listArchive: ListEventArchiveUseCase,
     private readonly vote: VoteOnQuestionUseCase,
     private readonly config: AppConfigService,
     @Inject(RATE_LIMITER) private readonly rateLimiter: RateLimiter,
@@ -178,6 +180,29 @@ export class PublicQuestionsController {
     await this.enforceLimit(RATE_LIMIT_RULES.publicRead, clientIp(request));
 
     return this.listQuestions.execute({ joinCode: code, attendee, query });
+  }
+
+  @Get('archive')
+  @ApiOperation({
+    summary: 'The public record of a finished event',
+    description:
+      'Approved and answered questions from a CLOSED event, ranked. Deliberately needs no attendee token: this is the page someone reaches by scanning a poster after the event, when they have no session and cannot be given one. Answers 404 for anything that is not a closed, previously published, public event — including a live one, which has its own board.',
+  })
+  @ApiParam({ name: 'joinCode', example: 'EVENTQ26' })
+  @ApiZodQuery(CursorPaginationQuery)
+  @ApiZodResponse(200, PublicQuestionListResponse, 'A page of the event record.')
+  async archive(
+    @Param('joinCode') joinCode: string,
+    @Query() query: QuestionListQueryDto,
+    @Req() request: Request,
+  ): Promise<PublicQuestionListResponse> {
+    const code = parseJoinCode(joinCode);
+    // Same read budget as the live board. There is no attendee identity to key
+    // on here, so the client IP is the only subject available — which is why
+    // the limit matters more, not less.
+    await this.enforceLimit(RATE_LIMIT_RULES.publicRead, clientIp(request));
+
+    return this.listArchive.execute({ joinCode: code, query });
   }
 
   @Put('questions/:questionId/vote')

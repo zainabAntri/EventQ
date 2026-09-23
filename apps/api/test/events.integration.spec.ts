@@ -619,7 +619,11 @@ describe('events', () => {
       expect(ProblemDetails.parse(response.body).code).toBe('EVENT_NOT_FOUND');
     });
 
-    it('hides a closed event', async () => {
+    it('discloses a public event that ran and has since closed', async () => {
+      // The one case deliberately NOT hidden. Its join code was displayed to a
+      // whole room and printed on posters, so confirming the event existed
+      // reveals nothing the venue did not already tell everyone in it — and it
+      // is what lets a poster scanned on the way home say something useful.
       const event = await createEvent(alice);
       const owner = { Cookie: alice.cookie };
       await testApp
@@ -628,8 +632,50 @@ describe('events', () => {
         .set(csrf)
         .set(owner)
         .expect(200);
-      await testApp.http().get(`/api/v1/public/events/${event.joinCode}`).expect(200);
 
+      const open = await testApp.http().get(`/api/v1/public/events/${event.joinCode}`).expect(200);
+      expect(open.body.status).toBe('PUBLISHED');
+      expect(open.body.closedAt).toBeNull();
+
+      await testApp
+        .http()
+        .post(`/api/v1/events/${event.id}/close`)
+        .set(csrf)
+        .set(owner)
+        .expect(200);
+
+      const closed = await testApp
+        .http()
+        .get(`/api/v1/public/events/${event.joinCode}`)
+        .expect(200);
+
+      expect(closed.body.status).toBe('CLOSED');
+      expect(closed.body.closedAt).not.toBeNull();
+      // Still the narrow public shape: disclosing that it finished must not
+      // widen what else the response carries.
+      expect(closed.body).not.toHaveProperty('id');
+      expect(closed.body).not.toHaveProperty('settings');
+      expect(closed.body).not.toHaveProperty('publishedAt');
+    });
+
+    it('hides a closed event whose access mode is PRIVATE', async () => {
+      // The organizer explicitly chose that this event not be findable. That
+      // choice outranks the closed-event disclosure entirely.
+      const event = await createEvent(alice);
+      const owner = { Cookie: alice.cookie };
+      await testApp
+        .http()
+        .post(`/api/v1/events/${event.id}/publish`)
+        .set(csrf)
+        .set(owner)
+        .expect(200);
+      await testApp
+        .http()
+        .patch(`/api/v1/events/${event.id}`)
+        .set(csrf)
+        .set(owner)
+        .send({ settings: { accessMode: 'PRIVATE' } })
+        .expect(200);
       await testApp
         .http()
         .post(`/api/v1/events/${event.id}/close`)
