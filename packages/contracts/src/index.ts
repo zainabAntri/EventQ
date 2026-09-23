@@ -18,3 +18,4 @@ export * from './auth.js';
 export * from './events.js';
 export * from './questions.js';
 export * from './ai.js';
+export * from './insights.js';

@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  AiCategory,
   AiFeature,
   type AiStatusResponse,
+  type CategoryBreakdownResponse,
   type CategorizeResponse,
   type ClusterResponse,
   type EventSummaryResponse,
@@ -237,6 +239,38 @@ export class ListTopicsUseCase {
   }
 }
 
+/**
+ * How the stored categories break down. A READ of what earlier categorize
+ * runs produced — it calls no model and costs nothing, so it is gated by
+ * `question:read` like the topics and the summary, not by `ai:run`.
+ */
+@Injectable()
+export class GetCategoryBreakdownUseCase {
+  constructor(@Inject(AI_REPOSITORY) private readonly repository: AiRepository) {}
+
+  async execute(eventId: string, context: RequestContext): Promise<CategoryBreakdownResponse> {
+    const event = await requireEvent(this.repository, eventId, context);
+    const breakdown = await this.repository.categoryBreakdown(event.eventId);
+
+    // A stored value outside the fixed set (written by an older category list)
+    // is left out rather than shown as a category the contract does not know.
+    const categories = breakdown.counts
+      .flatMap(({ category, questions }) => {
+        const parsed = AiCategory.safeParse(category);
+        return parsed.success ? [{ category: parsed.data, questions }] : [];
+      })
+      .sort((a, b) => b.questions - a.questions || a.category.localeCompare(b.category));
+
+    return {
+      categories,
+      categorized: categories.reduce((sum, entry) => sum + entry.questions, 0),
+      uncategorized: breakdown.uncategorized,
+      modelIds: breakdown.modelIds,
+      lastCategorizedAt: breakdown.lastCategorizedAt?.toISOString() ?? null,
+    };
+  }
+}
+
 /** 4. A drafted answer, stored as a draft. */
 @Injectable()
 export class SuggestAnswerUseCase {
@@ -385,6 +419,7 @@ function toTopicResponse(topic: TopicRecord): TopicResponse {
     summary: topic.summary,
     questionCount: topic.questionIds.length,
     questionIds: topic.questionIds,
+    generatedAt: topic.createdAt.toISOString(),
   };
 }
 

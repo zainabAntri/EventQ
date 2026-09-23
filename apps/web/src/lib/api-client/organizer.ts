@@ -3,7 +3,9 @@ import {
   AiStatusResponse,
   AuthSessionResponse,
   CategorizeResponse,
+  CategoryBreakdownResponse,
   ClusterResponse,
+  EventInsightsResponse,
   EventListResponse,
   EventResponse,
   EventSummaryResponse,
@@ -217,6 +219,22 @@ export function dismissDuplicate(questionId: string): Promise<QuestionResponse> 
   });
 }
 
+/**
+ * Measured facts about an event, for the insights page.
+ *
+ * Nothing in this response came from a model — the AI interpretation of the
+ * same event is fetched separately below, and the page keeps the two apart.
+ */
+export function getEventInsights(
+  eventId: string,
+  signal?: AbortSignal,
+): Promise<EventInsightsResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/insights`, {
+    schema: EventInsightsResponse,
+    ...(signal ? { signal } : {}),
+  });
+}
+
 /** Partial update. Used by the AI panel for the per-event switch. */
 export function updateEvent(eventId: string, body: UpdateEventRequest): Promise<EventResponse> {
   return apiRequest(`/events/${encodeURIComponent(eventId)}`, {
@@ -256,6 +274,17 @@ export function runCluster(eventId: string): Promise<ClusterResponse> {
 export function listTopics(eventId: string, signal?: AbortSignal): Promise<TopicResponse[]> {
   return apiRequest(`/events/${encodeURIComponent(eventId)}/ai/topics`, {
     schema: z.array(TopicResponse),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+/** The stored category counts. A read of earlier runs — calls no model. */
+export function getCategoryBreakdown(
+  eventId: string,
+  signal?: AbortSignal,
+): Promise<CategoryBreakdownResponse> {
+  return apiRequest(`/events/${encodeURIComponent(eventId)}/ai/categories`, {
+    schema: CategoryBreakdownResponse,
     ...(signal ? { signal } : {}),
   });
 }

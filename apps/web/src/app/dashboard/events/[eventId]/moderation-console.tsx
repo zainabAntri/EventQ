@@ -1,9 +1,19 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { QuestionSort, type EventResponse, type QuestionStatsResponse } from '@eventq/contracts';
-import { Alert, Button, FormField, Input, Label, LiveRegion, Spinner } from '@/components/ui';
+import {
+  Alert,
+  Button,
+  FormField,
+  Input,
+  Label,
+  LiveRegion,
+  Spinner,
+  buttonVariants,
+} from '@/components/ui';
 import { ApiError } from '@/lib/api-client';
 import { getEvent } from '@/lib/api-client/organizer';
 import { EventLifecyclePanel } from './event-lifecycle-panel';
@@ -208,10 +218,18 @@ function EventHeader({ event }: { event: EventResponse | null }) {
       {/* The join code used to be repeated here. It now lives in the QR card
           below, at a size somebody can read out across a room, and having it
           twice on one screen made it ambiguous which one to act on. */}
-      <div className="mt-1">
-        <h1 className="text-2xl font-bold tracking-tight text-balance sm:text-3xl">
+      <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
+        <h1 className="min-w-0 text-2xl font-bold tracking-tight text-balance sm:text-3xl">
           {event ? event.title : 'Loading…'}
         </h1>
+        {event ? (
+          <Link
+            href={`/dashboard/events/${event.id}/insights`}
+            className={buttonVariants({ size: 'sm', variant: 'outline' })}
+          >
+            Event insights
+          </Link>
+        ) : null}
       </div>
     </header>
   );

@@ -4,6 +4,7 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import type { MinimalQuestion } from '../domain/ai-prompts';
 import type {
   AiEventContext,
+  CategoryBreakdownRecord,
   AiQuestionRecord,
   AiRepository,
   SummaryRecord,
@@ -94,6 +95,40 @@ export class PrismaAiRepository implements AiRepository {
         OR: [{ enrichment: null }, { enrichment: { category: null } }],
       },
     });
+  }
+
+  async categoryBreakdown(eventId: string): Promise<CategoryBreakdownRecord> {
+    const live = { eventId, deletedAt: null, status: { in: [...LIVE_STATUSES] } };
+
+    const [grouped, uncategorized, models, latest] = await Promise.all([
+      this.prisma.questionEnrichment.groupBy({
+        by: ['category'],
+        where: { category: { not: null }, question: live },
+        _count: { _all: true },
+      }),
+      this.countUncategorized(eventId),
+      this.prisma.questionEnrichment.findMany({
+        where: { category: { not: null }, modelId: { not: null }, question: live },
+        select: { modelId: true },
+        distinct: ['modelId'],
+      }),
+      this.prisma.questionEnrichment.aggregate({
+        where: { category: { not: null }, question: live },
+        _max: { computedAt: true },
+      }),
+    ]);
+
+    const counts = grouped
+      .filter((group) => group.category !== null)
+      .map((group) => ({ category: group.category as string, questions: group._count._all }));
+
+    return {
+      counts,
+      categorized: counts.reduce((sum, entry) => sum + entry.questions, 0),
+      uncategorized,
+      modelIds: models.flatMap((row) => (row.modelId ? [row.modelId] : [])),
+      lastCategorizedAt: latest._max.computedAt,
+    };
   }
 
   async findLive(eventId: string, limit: number): Promise<AiQuestionRecord[]> {
@@ -191,7 +226,7 @@ export class PrismaAiRepository implements AiRepository {
             summary: topic.summary || null,
             questionCount: topic.questionIds.length,
           },
-          select: { id: true, label: true, summary: true },
+          select: { id: true, label: true, summary: true, createdAt: true },
         });
         // Scoped to the event: an id from another event cannot be re-pointed
         // even if the validator somehow let one through.
@@ -212,6 +247,7 @@ export class PrismaAiRepository implements AiRepository {
         id: true,
         label: true,
         summary: true,
+        createdAt: true,
         questions: { where: { deletedAt: null }, select: { id: true } },
       },
       orderBy: { questionCount: 'desc' },
@@ -221,6 +257,7 @@ export class PrismaAiRepository implements AiRepository {
       label: row.label,
       summary: row.summary,
       questionIds: row.questions.map((question) => question.id),
+      createdAt: row.createdAt,
     }));
   }
 

@@ -214,14 +214,27 @@ function stem(word: string): string {
  * use the same form.
  */
 export function contentTerms(normalizedBody: string): ReadonlySet<string> {
-  const terms = new Set<string>();
+  return new Set(contentWords(normalizedBody).keys());
+}
+
+/**
+ * The same content words, each stem mapped to the word it first came from.
+ *
+ * For display. A stem is fine to compare but not to show a person — "hiring"
+ * stems to "hir" — so anything that reports terms back to a human needs the
+ * word as it was written, and must still group by the stem so "business" and
+ * "businesses" count as one.
+ */
+export function contentWords(normalizedBody: string): ReadonlyMap<string, string> {
+  const words = new Map<string, string>();
 
   for (const word of normalizedBody.split(' ')) {
     if (word.length === 0 || STOPWORDS.has(word)) continue;
-    terms.add(stem(word));
+    const key = stem(word);
+    if (!words.has(key)) words.set(key, word);
   }
 
-  return terms;
+  return words;
 }
 
 /**
