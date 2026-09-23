@@ -11,6 +11,8 @@ The first use case is business networking events. The architecture deliberately 
 > A $0 deployment runs on the public internet — web on Vercel, API and Redis on Render, Postgres on Supabase. See [`docs/deploy-free-tier.md`](docs/deploy-free-tier.md).
 >
 > Not yet built: projector view, event branding, exports and team invites.
+>
+> Full status, open issues and the decisions behind them: [`docs/progress.md`](docs/progress.md).
 
 ---
 
