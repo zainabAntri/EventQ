@@ -101,15 +101,15 @@ Demo organizer is `owner@eventq.local`; the demo join code is `EVENTQ26`.
 
 ## 4. Open issues
 
-**CI "Tests" job is flaky.** Since the Phase 5 merge on 2026-09-17, the
-integration step fails on most runs but not all — the same commit has gone red
-and then green on a re-run. Locally the full 258 pass on both Node 22 and
-Node 24. Failing and passing runs take the same 73–85 seconds, so the suite
-completes; Vitest emits no per-test annotation, only `exit code 1`. Perf budgets
-and Node version were both investigated and ruled out. The working theory is an
-unhandled async error at teardown from the Redis, timer or AI-coordination code
-added in Phases 5–6. Current workaround is re-running the job. **Do not attribute
-a red Tests job to the PR under review without checking the annotations first.**
+**CI "Tests" job flakiness — root cause found, fix in review.** Since Phase 5
+the integration step failed intermittently on CI with `read ECONNRESET` on the
+concurrent-voting tests, and never locally. The test harness handed supertest a
+server that was not listening; supertest then listens itself and closes that
+shared server when its own request ends, while concurrent requests are still in
+the kernel's accept queue. Linux resets those (1113 of 2000 in a reproduction in
+a `node:24` container); Windows pre-accepts connections and never does, which is
+why the author's machine always passed. The fix (`fix/test-harness-listen`)
+listens once in `startTestApp`. Until it merges, re-running the job still works.
 
 **Cross-origin cookies are still unproven in a real browser.** Auth is built and
 tested, but only ever same-origin through supertest. The entire dashboard fetches
