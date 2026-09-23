@@ -36,6 +36,17 @@ export interface TopicRecord {
   label: string;
   summary: string | null;
   questionIds: string[];
+  /** When the clustering run that created it happened. */
+  createdAt: Date;
+}
+
+/** How live questions were categorised, with the provenance of the labels. */
+export interface CategoryBreakdownRecord {
+  counts: ReadonlyArray<{ category: string; questions: number }>;
+  categorized: number;
+  uncategorized: number;
+  modelIds: string[];
+  lastCategorizedAt: Date | null;
 }
 
 export interface SummaryRecord {
@@ -64,6 +75,9 @@ export interface AiRepository {
   /** Live questions (pending, approved, answered) with no category yet. */
   findUncategorized(eventId: string, limit: number): Promise<AiQuestionRecord[]>;
   countUncategorized(eventId: string): Promise<number>;
+
+  /** Read-only: counts the categories earlier runs stored. Calls no model. */
+  categoryBreakdown(eventId: string): Promise<CategoryBreakdownRecord>;
 
   /** Live questions, oldest first, capped. */
   findLive(eventId: string, limit: number): Promise<AiQuestionRecord[]>;

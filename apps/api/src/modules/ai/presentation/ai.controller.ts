@@ -3,6 +3,7 @@ import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import {
   AiStatusResponse,
   CategorizeResponse,
+  CategoryBreakdownResponse,
   ClusterResponse,
   EventSummaryResponse,
   LatestSummaryResponse,
@@ -19,6 +20,7 @@ import {
   ClusterQuestionsUseCase,
   FindSimilarQuestionUseCase,
   GetAiStatusUseCase,
+  GetCategoryBreakdownUseCase,
   GetLatestSummaryUseCase,
   ListTopicsUseCase,
   SuggestAnswerUseCase,
@@ -49,6 +51,7 @@ export class AiController {
     private readonly answer: SuggestAnswerUseCase,
     private readonly summarize: SummarizeEventUseCase,
     private readonly latestSummary: GetLatestSummaryUseCase,
+    private readonly categories: GetCategoryBreakdownUseCase,
   ) {}
 
   @Get('events/:eventId/ai/status')
@@ -82,6 +85,22 @@ export class AiController {
     @Ctx() context: RequestContext,
   ): Promise<CategorizeResponse> {
     return this.categorize.execute(eventId, context);
+  }
+
+  @Get('events/:eventId/ai/categories')
+  @RequirePermissions('question:read')
+  @ApiOperation({
+    summary: 'How the stored categories break down',
+    description:
+      'Counts of live questions per category, as assigned by earlier categorize runs, with how many are still uncategorized and which models assigned them. Calls no model and costs nothing. The counts are exact; each category is a model’s judgement, and the dashboard presents it as AI interpretation, not as a fact about the questions.',
+  })
+  @ApiParam({ name: 'eventId', format: 'uuid' })
+  @ApiZodResponse(200, CategoryBreakdownResponse, 'The breakdown.')
+  getCategories(
+    @Param('eventId', new ParseUUIDPipe({ version: '7' })) eventId: string,
+    @Ctx() context: RequestContext,
+  ): Promise<CategoryBreakdownResponse> {
+    return this.categories.execute(eventId, context);
   }
 
   @Post('questions/:questionId/ai/similar')

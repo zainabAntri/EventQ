@@ -122,6 +122,28 @@ Attendee text reaching a model is treated as **untrusted data, never instruction
 
 **What is deliberately not built:** automatic enrichment on submission (that is a queue project, and it would tie cost to the size of the room rather than to the organizer's choices), embeddings, and the Batch API.
 
+## 13a. Event Insights
+
+**Facts and interpretation are separated by the code, not only by labels.** `GET /events/:id/insights` returns measured facts only: its contract (`packages/contracts/src/insights.ts`) has no field a model could fill, and `InsightsModule` does not import the AI module. Anything a model produced (categories, topics, the summary) is served by `/ai/*` and rendered in a separate, dashed, "AI-generated" section. Each AI block there shows its model, when it ran, and how many of the current questions it covered, so a summary of 40 questions cannot pass for a picture of all 87. The insights page calls no model; it only reads what earlier runs stored.
+
+**Nothing was collected for insights.** Every figure is derived from questions, votes and the moderation audit trail, which the product keeps in order to work. There are no page views, devices, locations or per-attendee profiles, and engagement is reported as head-counts only. Each metric answers a decision an organizer makes:
+
+| Metric                         | Question it answers                                             |
+| ------------------------------ | --------------------------------------------------------------- |
+| Submitted, by status           | How big was this, and what happened to it?                      |
+| Unanswered + follow-up list    | What do we still owe the room after the event?                  |
+| Answer rate                    | Did the session cover what was asked?                           |
+| Askers / voters / participants | Was this two loud people, or the whole room?                    |
+| Most upvoted / most asked      | What did the room most want, and was it answered?               |
+| Submissions over time          | When did the room engage? (Where to put the next Q&A slot.)     |
+| Duplicate groups               | Where was demand concentrated? (Confirmed merges only.)         |
+| Median moderation wait         | Is pre-moderation a bottleneck for attendees?                   |
+| Frequent words                 | What came up, with AI off, at zero cost? (Counts, not meaning.) |
+
+Left out on purpose: anything that would need new collection (scan or view counts, device or location data) and anything per attendee. Neither leads to a decision that the list above does not already support.
+
+Everything is computed on request (the page is opened, not polled) from indexes that already existed. No migration was needed. The only step that loads rows instead of counting them is the word count, which is capped at the newest 5,000 live questions and says so when it truncates.
+
 ## 14. Errors
 
 Typed domain errors with stable codes → one global filter → RFC 9457 `application/problem+json`, always carrying a `traceId`. Internal detail is logged, never wired. `Idempotency-Key` on submission, because venue wifi genuinely drops requests.

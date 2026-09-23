@@ -113,8 +113,31 @@ export const TopicResponse = z.object({
   summary: z.string().nullable(),
   questionCount: z.number().int().nonnegative(),
   questionIds: z.array(EntityId),
+  /** When the clustering run that produced this topic happened. A run
+   *  replaces every topic, so a topic is exactly as old as its run — and
+   *  questions asked since then are in no topic at all. */
+  generatedAt: z.iso.datetime(),
 });
 export type TopicResponse = z.infer<typeof TopicResponse>;
+
+/**
+ * How the event's live questions were categorised, by the model.
+ *
+ * An AI INTERPRETATION, counted — not a measured fact about the questions.
+ * The count per category is exact; the category each question sits in is a
+ * model's judgement. `uncategorized` is reported beside it so a breakdown
+ * built from 40 of 87 questions cannot pass for a picture of all 87.
+ */
+export const CategoryBreakdownResponse = z.object({
+  categories: z.array(z.object({ category: AiCategory, questions: z.number().int().positive() })),
+  categorized: z.number().int().nonnegative(),
+  uncategorized: z.number().int().nonnegative(),
+  /** Every model that assigned one of these categories. */
+  modelIds: z.array(z.string()),
+  /** When the most recent category was assigned, or null when none has been. */
+  lastCategorizedAt: z.iso.datetime().nullable(),
+});
+export type CategoryBreakdownResponse = z.infer<typeof CategoryBreakdownResponse>;
 
 /** Result of grouping an event's questions into topics. */
 export const ClusterResponse = z.object({

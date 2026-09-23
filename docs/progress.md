@@ -15,14 +15,19 @@ changes, or when an open question closes.
 
 ## 1. Summary
 
-Six phases are built, tested and merged to `main`. The product is usable
+Seven phases are built, tested and merged to `main`. The product is usable
 end to end: an organizer signs up, creates an event, and gets a join code; an
 attendee scans and submits a question without an account; the organizer
 moderates, and questions rank by votes, demand and recency.
 
-Phase 7 adds the event experience end to end: the organizer UI that was missing
+Phase 7 added the event experience end to end: the organizer UI that was missing
 entirely — create, publish, QR code, printable poster, close — and what an
 attendee sees when they scan the poster after the event has finished.
+
+Phase 8 adds Event Insights: what happened at an event, as counted facts (volume,
+the follow-up list of unanswered questions, engagement, timing, duplicates,
+moderation wait), with any AI interpretation shown in a separate, labelled section.
+It collects nothing new and calls no model.
 
 It runs on the public internet on a $0 stack (Vercel + Render + Supabase), with
 AI switched off and nothing spent. Still not built: the projector view, logo
@@ -44,7 +49,8 @@ that numbering is dead, and this table is the one that counts.
 | 4     | Organizer dashboard + moderation console                                                   | Complete  | #4     | 2026-08-31 |
 | 5     | Upvoting, ranking, duplicate merging                                                       | Complete  | #5     | 2026-09-17 |
 | 6     | AI enrichment layer, entirely behind two off-by-default switches                           | Complete  | #6     | 2026-09-17 |
-| 7     | Event experience — organizer create/publish/QR/print, accent branding, closed-event screen | In review | —      | —          |
+| 7     | Event experience — organizer create/publish/QR/print, accent branding, closed-event screen | Complete  | #13    | 2026-09-23 |
+| 8     | Event Insights — measured facts, kept apart from AI interpretation                         | In review | —      | —          |
 
 **A note on the numbering drift.** The plan originally put product depth
 (upvoting, projector, branding, exports, invites) in Phase 4 and hardening in
@@ -161,6 +167,12 @@ contrast-sensitive use is derived by `brandPalette` in
 `packages/contracts/src/branding.ts`, which corrects the colour until text on it
 clears WCAG AA. A hue sweep over ~1,700 colours holds that line in the test
 suite. Do not use a raw accent as a fill or as text.
+
+**Insights facts and AI interpretation never share a response.** `/insights` has
+no field a model could fill, and the insights module does not import the AI
+module. AI views of an event stay under `/ai/*` and render in their own labelled
+section with model, date and coverage. Do not "simplify" this by folding topics or
+the summary into the insights response. See [`architecture.md`](architecture.md) §13a.
 
 **Nothing in `packages/contracts` may use a zod `.transform()`.** Every request
 shape becomes a JSON Schema for the OpenAPI document, and a transform has no

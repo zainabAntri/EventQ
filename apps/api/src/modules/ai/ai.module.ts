@@ -6,6 +6,7 @@ import {
   ClusterQuestionsUseCase,
   FindSimilarQuestionUseCase,
   GetAiStatusUseCase,
+  GetCategoryBreakdownUseCase,
   GetLatestSummaryUseCase,
   ListTopicsUseCase,
   SuggestAnswerUseCase,
@@ -41,6 +42,7 @@ import { AI_COORDINATION, AI_REPOSITORY } from './domain/ai.repository';
     SuggestAnswerUseCase,
     SummarizeEventUseCase,
     GetLatestSummaryUseCase,
+    GetCategoryBreakdownUseCase,
 
     AnthropicAiProvider,
     PrismaAiRepository,

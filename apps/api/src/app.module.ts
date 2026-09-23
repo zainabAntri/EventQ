@@ -12,6 +12,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { EventsModule } from './modules/events/events.module';
 import { QuestionsModule } from './modules/questions/questions.module';
 import { AiModule } from './modules/ai/ai.module';
+import { InsightsModule } from './modules/insights/insights.module';
 
 /**
  * Composition root.
@@ -33,6 +34,7 @@ import { AiModule } from './modules/ai/ai.module';
     EventsModule,
     QuestionsModule,
     AiModule,
+    InsightsModule,
   ],
   providers: [
     {
