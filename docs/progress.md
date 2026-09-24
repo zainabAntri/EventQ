@@ -18,11 +18,25 @@ changes, or when an open question closes.
 Read this section first. It is the handoff note for the next working session,
 so nobody has to reconstruct the state from git history.
 
-- **Branch in flight:** `fix/security-hardening` (Phase 9, not merged).
-- **Doing:** a whole-application security audit. Critical and High findings get
-  fixed with a test each; Medium and Low are recorded in §9 for later.
-- **Next step:** see §9. Its status column says which findings are still open.
-- **Do not claim production readiness** while any Critical or High in §9 is open.
+**Paused 2026-09-24, at a clean stopping point.**
+
+- **Branch:** `fix/security-hardening` (Phase 9), pushed, not merged. The
+  author opens the PR.
+- **Done:** the audit (four areas, every finding checked against the code) and
+  all three High fixes, each with a test. No Critical findings. Gate green:
+  `pnpm verify` passes, and the integration suite ran 300/300.
+- **Before merging, deploy steps only the author can do** (§9.3):
+  1. Set `API_PROXY_SHARED_SECRET` to the same new value on Render and Vercel.
+  2. `pnpm db:deploy` against Supabase (new migration `lock_public_schema`).
+  3. Supabase dashboard → Advisors → Security: expect no "RLS disabled" findings.
+- **Next when work resumes:** pick Medium findings from §9.2. Suggested order:
+  M1 display-name moderation, M2 Redis outage takes attendee routes down, M3
+  identity minting, M4 AI spend per organization (before AI is ever enabled).
+- **Production readiness:** the code has no open Critical or High. Do not
+  call the _deployment_ ready until the §9.3 steps are done and checked.
+- **Local testing gotcha:** `sentinelhub-redis` (another project) holds port 6379. Run the integration suite against a throwaway Redis instead:
+  `docker run -d --rm --name eventq-redis-test -p 127.0.0.1:6380:6379 redis:7-alpine`,
+  then set `REDIS_URL=redis://127.0.0.1:6380` for the run.
 
 ---
 
@@ -65,7 +79,7 @@ that numbering is dead, and this table is the one that counts.
 | 6     | AI enrichment layer, entirely behind two off-by-default switches                           | Complete | #6     | 2026-09-17 |
 | 7     | Event experience — organizer create/publish/QR/print, accent branding, closed-event screen | Complete | #13    | 2026-09-23 |
 | 8     | Event Insights — measured facts, kept apart from AI interpretation                         | Complete | #14    | 2026-09-23 |
-| 9     | Security audit and hardening — fix every Critical and High finding                         | Active   | —      | —          |
+| 9     | Security audit and hardening — fix every Critical and High finding                         | Paused   | —      | —          |
 
 **A note on the numbering drift.** The plan originally put product depth
 (upvoting, projector, branding, exports, invites) in Phase 4 and hardening in
@@ -260,3 +274,54 @@ These cost real time when rediscovered from scratch.
 - **Supabase reports a wrong password as `P1001`** — a connection error, not an
   auth error — so a bad password reads as "cannot reach the database". Check the
   password before debugging the network.
+
+---
+
+## 9. Phase 9 — security audit (2026-09-24)
+
+Four areas were reviewed read-only, and every finding was checked against the
+code: authentication and HTTP; authorization; public attendee endpoints and
+data; AI, infrastructure and dependencies. **No Critical findings.** There is
+no IDOR, SQL injection or XSS, and no mass assignment or secret in git history.
+Every organizer query is scoped to the organization inside the SQL itself.
+
+### 9.1 High — fixed on `fix/security-hardening`
+
+| #   | Vulnerability                                                                                                                                                                                                                                                             | Fix                                                                                                                                                                                                                                                        | Test proving it                                                                                                                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H1  | Behind the Vercel proxy every visitor shared one IP, so per-IP limits were global: 11 bad logins from anyone locked out all logins; ~100 attendees polling the board locked out every event. A success also reset the login bucket, allowing unlimited password spraying. | `apps/web/src/proxy.ts` forwards the real client IP with `API_PROXY_SHARED_SECRET`; `shared/http/client-ip.ts` believes it only when the secret matches. IPv6 grouped by /64. Board poll limited per attendee (`boardRead`). Login bucket no longer reset. | `client-ip.spec.ts`, `proxy.spec.ts`; `auth.integration.spec.ts` "behind the web proxy" (separate buckets, spoofed header ignored, no reset on success); `voting.integration.spec.ts` board poll per attendee |
+| H2  | Next.js 16.3.2: two critical RCE advisories (GHSA-2xp9-vwfh-vxw4, GHSA-p293-qw3h-jr36) plus `sharp`.                                                                                                                                                                      | Next 16.3.6. `pnpm.overrides` for multer ^2.3.0, qs ^6.16.0 and mysql2 ^3.23.1 (same major versions, not reachable anyway).                                                                                                                                | `pnpm audit --prod`: only deepmerge-ts remains (see 9.2).                                                                                                                                                     |
+| H3  | No RLS on any `public` table. Supabase's REST API serves them to anyone with the anon key (public by design), including `users` with password hashes. Not confirmed live: the project is not visible from the dev session.                                                | Migration `20260924100000_lock_public_schema`: RLS on every table with no policies, and all privileges revoked from `anon`/`authenticated`. Prisma owns the tables, so it is unaffected. Rule documented in `migrations.md`.                               | `schema.integration.spec.ts` "closed to the Supabase Data API": every table has RLS; a granted `anon` role sees 0 rows; the real migration file revokes Supabase's default grants.                            |
+
+### 9.2 Medium and Low — open, recorded for later
+
+| #   | Sev    | Finding                                                                                                                                                       | Suggested fix                                                                             |
+| --- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| M1  | Medium | An attendee's display name skips moderation and renames their already-approved questions (live join).                                                         | Snapshot the name onto the question at submit; run spam/profanity checks on names.        |
+| M2  | Medium | Redis down in production fails every attendee route (the limiter fails closed for all rules, not just auth).                                                  | Per-rule fail mode: closed for `auth:*`, in-process fallback for attendee rules.          |
+| M3  | Medium | Unlimited throwaway identities: one IP can mint 300/min, inflating votes and flooding POST-moderated boards.                                                  | Tight per-IP-per-event cap on NEW identities; optional challenge when join rate spikes.   |
+| M4  | Medium | AI spend cap is platform-wide: one self-registered org can exhaust it for everyone, and `/ai/status` shows other tenants' spend. AI is off today.             | Per-org monthly cap; return only the org's own spend; atomic budget reservation (A3).     |
+| M5  | Medium | Per-account lockout can be bypassed with parallel requests (read-then-write counter).                                                                         | Atomic `increment`, or a Redis per-email limiter before argon2.                           |
+| M6  | Medium | Postgres TLS is not enforced by the app; depends on `sslmode` in `DATABASE_URL`. Unverified on Render.                                                        | Check the Render URL; enable "Enforce SSL" in Supabase; boot guard once the CA is sorted. |
+| M7  | Medium | Prompt injection: question text can steer free-text AI output (drafts, summaries). No AI output changes state.                                                | Delimit questions as untrusted data; strip URLs/emails from model free text.              |
+| L1  | Low    | Account enumeration via the lockout response (only existing emails lock) and the register 409.                                                                | Count unknown emails too; consider email-verification sign-up.                            |
+| L2  | Low    | Refresh rotation not atomic; access JWTs outlive logout and demotion for up to 15 min.                                                                        | Claim the row with a conditional `updateMany`; add a session id plus revocation check.    |
+| L3  | Low    | Moderation and merge still work on CLOSED events, altering the public archive.                                                                                | Refuse unless the event is DRAFT/PUBLISHED, in the transactional predicate.               |
+| L4  | Low    | Public event lookup by join code has no rate limit, despite the comment claiming one.                                                                         | Add a `publicLookup` rule (now meaningful, since H1 gives real client IPs).               |
+| L5  | Low    | Non-UUID cursor ids and NFKC-expanded display names give 500s with stack logs; oversized bodies give 500 not 413.                                             | Validate the cursor id; re-check length after normalising; map 4xx body-parser errors.    |
+| L6  | Low    | No Content-Security-Policy on the web app.                                                                                                                    | Nonce-based CSP in `proxy.ts`.                                                            |
+| L7  | Low    | `NODE_ENV` defaults to development, silently disabling every production guard if unset.                                                                       | Make it required.                                                                         |
+| L8  | Low    | CI has no `permissions:` block and actions are not SHA-pinned; docker-compose binds 0.0.0.0; app DB role is `postgres`.                                       | `contents: read`; pin SHAs; bind 127.0.0.1; a least-privilege runtime role.               |
+| L9  | Low    | Near-duplicate search cannot use the trigram index; cost grows with event size.                                                                               | Use the `%` operator with a similarity threshold.                                         |
+| —   | Info   | `deepmerge-ts` (high advisory) via Prisma's config loader: the fix is a major bump inside Prisma, and the only input is our own `prisma.config.ts`. Accepted. | Revisit on the next Prisma upgrade.                                                       |
+
+### 9.3 Deploy steps for the author
+
+1. Generate one secret (`openssl rand -base64 48`) and set it as
+   `API_PROXY_SHARED_SECRET` on **both** Render and Vercel, then redeploy both.
+   Check: `curl -i https://event-q-web.vercel.app/health/ready` still returns 200. Then sign in from a laptop after 11 bad logins from a phone on mobile
+   data; the laptop must not get a 429.
+2. `DATABASE_URL='<session pooler url>' pnpm db:deploy` to apply
+   `lock_public_schema` to Supabase.
+3. Supabase → Advisors → Security: no `rls_disabled_in_public`. Optionally
+   turn the Data API off entirely (Settings → API), since EventQ never uses it.
