@@ -6,11 +6,11 @@ An organizer creates an event; the system mints a join code, QR code and public 
 
 The first use case is business networking events. The architecture deliberately absorbs conferences, seminars, workshops, university events, webinars, corporate meetings and panel discussions without a schema change.
 
-> **Status: phases 1–6 complete.** Organizer auth, the event lifecycle, anonymous attendee submission, the moderation console, upvoting with duplicate-merging, and the optional AI layer are all built, tested and merged.
+> **Status: phases 1–8 complete; Phase 9 (security audit and hardening) in progress.** Organizer auth, the event lifecycle, anonymous attendee submission, the moderation console, upvoting with duplicate-merging, the optional AI layer, the organizer event experience (QR, poster, branding) and Event Insights are all built, tested and merged.
 >
 > A $0 deployment runs on the public internet — web on Vercel, API and Redis on Render, Postgres on Supabase. See [`docs/deploy-free-tier.md`](docs/deploy-free-tier.md).
 >
-> Not yet built: projector view, event branding, exports and team invites.
+> Not yet built: projector view, logo upload, exports and team invites.
 >
 > Full status, open issues and the decisions behind them: [`docs/progress.md`](docs/progress.md).
 

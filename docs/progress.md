@@ -8,14 +8,28 @@ returning after a break, and for anyone joining the repo. Design lives in
 [`development.md`](development.md). Neither of those records status, so this one
 does.
 
-**Last updated: 2026-09-23.** Update it when a PR merges, when the deployment
+**Last updated: 2026-09-24.** Update it when a PR merges, when the deployment
 changes, or when an open question closes.
+
+---
+
+## 0. Resume here
+
+Read this section first. It is the handoff note for the next working session,
+so nobody has to reconstruct the state from git history.
+
+- **Branch in flight:** `fix/security-hardening` (Phase 9, not merged).
+- **Doing:** a whole-application security audit. Critical and High findings get
+  fixed with a test each; Medium and Low are recorded in §9 for later.
+- **Next step:** see §9. Its status column says which findings are still open.
+- **Do not claim production readiness** while any Critical or High in §9 is open.
 
 ---
 
 ## 1. Summary
 
-Seven phases are built, tested and merged to `main`. The product is usable
+Eight phases are built, tested and merged to `main`. Phase 9, a security
+audit and hardening pass, is in progress. The product is usable
 end to end: an organizer signs up, creates an event, and gets a join code; an
 attendee scans and submits a question without an account; the organizer
 moderates, and questions rank by votes, demand and recency.
@@ -24,7 +38,7 @@ Phase 7 added the event experience end to end: the organizer UI that was missing
 entirely — create, publish, QR code, printable poster, close — and what an
 attendee sees when they scan the poster after the event has finished.
 
-Phase 8 adds Event Insights: what happened at an event, as counted facts (volume,
+Phase 8 added Event Insights: what happened at an event, as counted facts (volume,
 the follow-up list of unanswered questions, engagement, timing, duplicates,
 moderation wait), with any AI interpretation shown in a separate, labelled section.
 It collects nothing new and calls no model.
@@ -41,16 +55,17 @@ Phase numbers follow the author's scheme — Phase 1 is the foundation, not a
 walking skeleton. The original architecture proposal numbered them one lower;
 that numbering is dead, and this table is the one that counts.
 
-| Phase | Scope                                                                                      | Status    | PR     | Merged     |
-| ----- | ------------------------------------------------------------------------------------------ | --------- | ------ | ---------- |
-| 1     | Foundation — monorepo, NestJS + Next.js, Prisma, CI, test infra                            | Complete  | —      | 2026-08-24 |
-| 2     | Organizer auth; organization + event domain and lifecycle                                  | Complete  | #1, #2 | 2026-08-25 |
-| 3     | Attendee flow — attendee tokens, no-account submission, spam heuristics                    | Complete  | #3     | 2026-08-25 |
-| 4     | Organizer dashboard + moderation console                                                   | Complete  | #4     | 2026-08-31 |
-| 5     | Upvoting, ranking, duplicate merging                                                       | Complete  | #5     | 2026-09-17 |
-| 6     | AI enrichment layer, entirely behind two off-by-default switches                           | Complete  | #6     | 2026-09-17 |
-| 7     | Event experience — organizer create/publish/QR/print, accent branding, closed-event screen | Complete  | #13    | 2026-09-23 |
-| 8     | Event Insights — measured facts, kept apart from AI interpretation                         | In review | —      | —          |
+| Phase | Scope                                                                                      | Status   | PR     | Merged     |
+| ----- | ------------------------------------------------------------------------------------------ | -------- | ------ | ---------- |
+| 1     | Foundation — monorepo, NestJS + Next.js, Prisma, CI, test infra                            | Complete | —      | 2026-08-24 |
+| 2     | Organizer auth; organization + event domain and lifecycle                                  | Complete | #1, #2 | 2026-08-25 |
+| 3     | Attendee flow — attendee tokens, no-account submission, spam heuristics                    | Complete | #3     | 2026-08-25 |
+| 4     | Organizer dashboard + moderation console                                                   | Complete | #4     | 2026-08-31 |
+| 5     | Upvoting, ranking, duplicate merging                                                       | Complete | #5     | 2026-09-17 |
+| 6     | AI enrichment layer, entirely behind two off-by-default switches                           | Complete | #6     | 2026-09-17 |
+| 7     | Event experience — organizer create/publish/QR/print, accent branding, closed-event screen | Complete | #13    | 2026-09-23 |
+| 8     | Event Insights — measured facts, kept apart from AI interpretation                         | Complete | #14    | 2026-09-23 |
+| 9     | Security audit and hardening — fix every Critical and High finding                         | Active   | —      | —          |
 
 **A note on the numbering drift.** The plan originally put product depth
 (upvoting, projector, branding, exports, invites) in Phase 4 and hardening in
@@ -69,6 +84,8 @@ invites are still outstanding.
 | #10 | Fix: native form controls ignored the colour scheme                                         | 2026-09-19 |
 | #11 | Asked-by priority — `askedByCount` plus a demand term in the ranking score                  | 2026-09-22 |
 | #12 | Repo prep for a collaborator — README rewrite, shared Claude Code settings                  | 2026-09-22 |
+| #16 | Fix: test harness listens once, ending the flaky CI integration job                         | 2026-09-23 |
+| #17 | Fix: shared dashboard bar with Your events, New event and Sign out                          | 2026-09-23 |
 
 ---
 
@@ -101,16 +118,6 @@ Demo organizer is `owner@eventq.local`; the demo join code is `EVENTQ26`.
 
 ## 4. Open issues
 
-**CI "Tests" job flakiness — root cause found, fix in review.** Since Phase 5
-the integration step failed intermittently on CI with `read ECONNRESET` on the
-concurrent-voting tests, and never locally. The test harness handed supertest a
-server that was not listening; supertest then listens itself and closes that
-shared server when its own request ends, while concurrent requests are still in
-the kernel's accept queue. Linux resets those (1113 of 2000 in a reproduction in
-a `node:24` container); Windows pre-accepts connections and never does, which is
-why the author's machine always passed. The fix (`fix/test-harness-listen`)
-listens once in `startTestApp`. Until it merges, re-running the job still works.
-
 **Cross-origin cookies are still unproven in a real browser.** Auth is built and
 tested, but only ever same-origin through supertest. The entire dashboard fetches
 client-side with `credentials: 'include'`, so if the cookie does not cross
@@ -129,6 +136,12 @@ clean.
 logic and the accessibility tree, but nothing has verified an actual QR scan
 from another phone, a real slow or intermittent connection, or the printed
 poster coming out of a printer at the right size. See §8.
+
+_Closed 2026-09-23: CI "Tests" flakiness (`read ECONNRESET` on the
+concurrent-voting tests, Linux only). The harness handed supertest a server that
+was not listening, so supertest listened itself and closed the shared server
+while other requests were still queued. Fixed in #16 by listening once in
+`startTestApp`._
 
 _Closed 2026-09-23: the dashboard had no copy-link or QR button. Phase 7 added
 the QR card, both downloads and the printable poster._
@@ -198,7 +211,8 @@ From the original plan, still outstanding:
   Supabase Storage bucket and an upload path, and is its own piece of work.
 - **Exports** — questions out as CSV/PDF after an event.
 - **Team invites** — more than one organizer per organization.
-- **Hardening pass** — load test, accessibility audit, security review, SLOs.
+- **Hardening pass** — load test, accessibility audit, SLOs. The security
+  review is Phase 9 (§9).
   The non-functional targets in [`architecture.md`](architecture.md) §2 are
   design targets; none has been measured under load.
 
