@@ -25,8 +25,9 @@ export interface RateLimiter {
   /** Consumes one attempt against `key` and reports whether it is allowed. */
   consume(rule: RateLimitRule, key: string): Promise<RateLimitDecision>;
 
-  /** Clears the counter — used after a successful login, so one bad password
-   *  followed by the right one does not count toward a lockout. */
+  /** Clears the counter. Deliberately NOT called after a successful login:
+   *  that let an attacker reset their own per-IP bucket by signing into an
+   *  account they control between guesses (see auth.controller.ts). */
   reset(rule: RateLimitRule, key: string): Promise<void>;
 }
 
@@ -63,7 +64,20 @@ export const RATE_LIMIT_RULES = {
    */
   attendeeJoin: { name: 'attendee:join', limit: 300, windowSeconds: 60 },
   questionSubmitPerIp: { name: 'question:submit:ip', limit: 120, windowSeconds: 60 },
+  /** Unauthenticated reads (the closed-event archive), where the IP is the
+   *  only subject available. */
   publicRead: { name: 'public:read', limit: 600, windowSeconds: 60 },
+
+  /**
+   * The live board, per ATTENDEE rather than per IP.
+   *
+   * The board polls every 10 seconds, so a room of 100 people on one venue
+   * address is already 600 reads a minute — keyed on the IP, the room would
+   * lock itself out with no attacker present. Keyed on the attendee, one
+   * device gets ten times its polling rate, and a script minting identities to
+   * read faster is bounded by attendeeJoin first.
+   */
+  boardRead: { name: 'public:board', limit: 60, windowSeconds: 60 },
 
   /**
    * Voting, per ATTENDEE and per IP.
