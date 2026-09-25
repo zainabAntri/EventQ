@@ -18,25 +18,22 @@ changes, or when an open question closes.
 Read this section first. It is the handoff note for the next working session,
 so nobody has to reconstruct the state from git history.
 
-**Paused 2026-09-24, at a clean stopping point.**
+**Updated 2026-09-25. Phase 9 High fixes are merged; Medium findings are next.**
 
-- **Branch:** `fix/security-hardening` (Phase 9), pushed, not merged. The
-  author opens the PR.
-- **Done:** the audit (four areas, every finding checked against the code) and
-  all three High fixes, each with a test. No Critical findings. Gate green:
-  `pnpm verify` passes, and the integration suite ran 300/300.
-- **Deploy steps (§9.3) done 2026-09-25:** `API_PROXY_SHARED_SECRET` set on
-  Render and Vercel (both redeployed); `lock_public_schema` applied to
-  Supabase; Security Advisor shows 0 errors. The secret has no effect until
-  this branch is merged and deployed. The branch is already based on the
-  latest `main` (#17), so the PR merges cleanly.
-- **Next when work resumes:** pick Medium findings from §9.2. Suggested order:
-  M1 display-name moderation, M2 Redis outage takes attendee routes down, M3
+- **Merged:** `fix/security-hardening` as PR #18. No Critical findings; all
+  three High fixes (H1–H3) are on `main`, each with a test.
+- **Deploy steps (§9.3) done:** `API_PROXY_SHARED_SECRET` set on Render and
+  Vercel; `lock_public_schema` applied to Supabase; Security Advisor shows
+  0 errors (2 "Extension in Public" warnings are recorded as L10).
+- **One check left before calling production ready:** after #18 deploys,
+  11 bad logins from a phone on mobile data, then a correct login from a
+  laptop. The laptop must not get a 429.
+- **Open PR #15** (`fix/select-option-colors`): its CI fails on the old
+  `ECONNRESET` flake because the branch predates the #16 fix. Press
+  "Update branch" on GitHub, then merge when green.
+- **Next:** Medium findings from §9.2, one branch each. Suggested order: M1
+  display-name moderation, M2 Redis outage takes attendee routes down, M3
   identity minting, M4 AI spend per organization (before AI is ever enabled).
-- **Production readiness:** the code has no open Critical or High. Do not
-  call the _deployment_ ready until this branch is merged and deployed, and
-  the H1 check in §9.3 step 1 (11 bad logins from a phone, laptop not 429'd)
-  passes against production.
 - **Local testing gotcha:** `sentinelhub-redis` (another project) holds port 6379. Run the integration suite against a throwaway Redis instead:
   `docker run -d --rm --name eventq-redis-test -p 127.0.0.1:6380:6379 redis:7-alpine`,
   then set `REDIS_URL=redis://127.0.0.1:6380` for the run.
