@@ -25,15 +25,18 @@ so nobody has to reconstruct the state from git history.
 - **Done:** the audit (four areas, every finding checked against the code) and
   all three High fixes, each with a test. No Critical findings. Gate green:
   `pnpm verify` passes, and the integration suite ran 300/300.
-- **Before merging, deploy steps only the author can do** (§9.3):
-  1. Set `API_PROXY_SHARED_SECRET` to the same new value on Render and Vercel.
-  2. `pnpm db:deploy` against Supabase (new migration `lock_public_schema`).
-  3. Supabase dashboard → Advisors → Security: expect no "RLS disabled" findings.
+- **Deploy steps (§9.3) done 2026-09-25:** `API_PROXY_SHARED_SECRET` set on
+  Render and Vercel (both redeployed); `lock_public_schema` applied to
+  Supabase; Security Advisor shows 0 errors. The secret has no effect until
+  this branch is merged and deployed. The branch is already based on the
+  latest `main` (#17), so the PR merges cleanly.
 - **Next when work resumes:** pick Medium findings from §9.2. Suggested order:
   M1 display-name moderation, M2 Redis outage takes attendee routes down, M3
   identity minting, M4 AI spend per organization (before AI is ever enabled).
 - **Production readiness:** the code has no open Critical or High. Do not
-  call the _deployment_ ready until the §9.3 steps are done and checked.
+  call the _deployment_ ready until this branch is merged and deployed, and
+  the H1 check in §9.3 step 1 (11 bad logins from a phone, laptop not 429'd)
+  passes against production.
 - **Local testing gotcha:** `sentinelhub-redis` (another project) holds port 6379. Run the integration suite against a throwaway Redis instead:
   `docker run -d --rm --name eventq-redis-test -p 127.0.0.1:6380:6379 redis:7-alpine`,
   then set `REDIS_URL=redis://127.0.0.1:6380` for the run.
@@ -313,9 +316,17 @@ Every organizer query is scoped to the organization inside the SQL itself.
 | L7  | Low    | `NODE_ENV` defaults to development, silently disabling every production guard if unset.                                                                       | Make it required.                                                                         |
 | L8  | Low    | CI has no `permissions:` block and actions are not SHA-pinned; docker-compose binds 0.0.0.0; app DB role is `postgres`.                                       | `contents: read`; pin SHAs; bind 127.0.0.1; a least-privilege runtime role.               |
 | L9  | Low    | Near-duplicate search cannot use the trigram index; cost grows with event size.                                                                               | Use the `%` operator with a similarity threshold.                                         |
+| L10 | Low    | Supabase Advisor warns "Extension in Public" for `pg_trgm` and `vector`. Not exploitable on its own; moving them risks the trigram index and migrations.      | Move to an `extensions` schema in a planned migration, with the index re-checked.         |
 | —   | Info   | `deepmerge-ts` (high advisory) via Prisma's config loader: the fix is a major bump inside Prisma, and the only input is our own `prisma.config.ts`. Accepted. | Revisit on the next Prisma upgrade.                                                       |
 
 ### 9.3 Deploy steps for the author
+
+Steps 1–3 done 2026-09-25; the step 1 login check waits for the merge.
+If the shell's `DATABASE_URL` does not reach Prisma (it falls back to
+`apps/api/.env` and reports `localhost:5432`), put the URL in the gitignored
+`apps/api/.env.supabase`, run
+`node --env-file=.env.supabase node_modules/prisma/build/index.js migrate deploy`
+from `apps/api`, then delete the file.
 
 1. Generate one secret (`openssl rand -base64 48`) and set it as
    `API_PROXY_SHARED_SECRET` on **both** Render and Vercel, then redeploy both.
