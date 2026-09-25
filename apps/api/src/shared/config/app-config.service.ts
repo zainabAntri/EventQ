@@ -50,6 +50,8 @@ export class AppConfigService {
       webOrigin: this.get('WEB_ORIGIN'),
       publicUrl: this.get('API_PUBLIC_URL'),
       corsAllowedOrigins: this.get('CORS_ALLOWED_ORIGINS'),
+      /** Undefined when no trusted proxy is configured. */
+      proxySharedSecret: this.get('API_PROXY_SHARED_SECRET') || undefined,
     } as const;
   }
 

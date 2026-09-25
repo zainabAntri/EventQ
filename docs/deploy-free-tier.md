@@ -82,16 +82,18 @@ Environment variables:
 | `ATTENDEE_TOKEN_SECRET`                                 | a _different_ `openssl rand -base64 48`                               |
 | `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | `unused`                                                              |
 | `AI_ENABLED`                                            | `false`                                                               |
+| `API_PROXY_SHARED_SECRET`                               | a third `openssl rand -base64 48` — the same value as on Vercel       |
 
 ### 4. Vercel
 
 Project → Settings → Environment Variables (Production):
 
-| Key                    | Value                                                      |
-| ---------------------- | ---------------------------------------------------------- |
-| `API_PROXY_TARGET`     | `https://<service>.onrender.com`                           |
-| `NEXT_PUBLIC_API_URL`  | `https://event-q-web.vercel.app` — the site's _own_ origin |
-| `NEXT_PUBLIC_SITE_URL` | `https://event-q-web.vercel.app`                           |
+| Key                       | Value                                                      |
+| ------------------------- | ---------------------------------------------------------- |
+| `API_PROXY_TARGET`        | `https://<service>.onrender.com`                           |
+| `NEXT_PUBLIC_API_URL`     | `https://event-q-web.vercel.app` — the site's _own_ origin |
+| `NEXT_PUBLIC_SITE_URL`    | `https://event-q-web.vercel.app`                           |
+| `API_PROXY_SHARED_SECRET` | the same value as on Render                                |
 
 Redeploy.
 
@@ -109,7 +111,12 @@ Then sign in at `https://event-q-web.vercel.app/sign-in`. DevTools → Applicati
 
 - Render free sleeps after 15 idle minutes; the first request takes 30–60 s and
   the Vercel proxy may give up on that one. Reload once.
-- Two proxies deep (Vercel → Render) with `trust proxy 1`, every visitor shares
-  Vercel's edge IP for the per-IP login limit (10 per 15 min). Fine for a demo.
+- Rate limits need `API_PROXY_SHARED_SECRET` set identically on both sides.
+  Without it, every visitor reaches Render from Vercel's address and shares ONE
+  per-IP bucket, so ten bad logins from anyone lock out everyone. The web proxy
+  (`apps/web/src/proxy.ts`) forwards the real client IP with the secret, and the
+  API believes it only when the secret matches. Check after deploying: eleven
+  bad logins from your phone's mobile data must not stop you signing in from
+  your laptop.
 - Supabase pauses idle free projects; Render's free Key Value is not persistent.
   Both are acceptable for a demo and unacceptable for production.

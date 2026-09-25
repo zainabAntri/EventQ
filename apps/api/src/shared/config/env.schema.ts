@@ -46,6 +46,18 @@ export const envSchema = z
         error:
           'CORS_ALLOWED_ORIGINS cannot contain "*". Credentialed requests require exact origins.',
       }),
+    /**
+     * Shared with the web tier's proxy, which sends it alongside the client IP
+     * it observed. Empty means "no trusted proxy": the forwarded IP header is
+     * then ignored entirely. See shared/http/client-ip.ts.
+     */
+    API_PROXY_SHARED_SECRET: z
+      .string()
+      .default('')
+      .refine((value) => value === '' || value.length >= 32, {
+        error:
+          'API_PROXY_SHARED_SECRET must be empty or at least 32 characters. Generate with: openssl rand -base64 48',
+      }),
 
     // --- Cookies ---
     /**
@@ -124,7 +136,11 @@ export const envSchema = z
 
       // A placeholder secret that survives to production is a known incident
       // pattern. Fail loudly at boot.
-      for (const key of ['JWT_ACCESS_SECRET', 'ATTENDEE_TOKEN_SECRET'] as const) {
+      for (const key of [
+        'JWT_ACCESS_SECRET',
+        'ATTENDEE_TOKEN_SECRET',
+        'API_PROXY_SHARED_SECRET',
+      ] as const) {
         if (env[key].startsWith('replace-me')) {
           ctx.addIssue({
             code: 'custom',

@@ -261,6 +261,28 @@ describe('attendee voting', () => {
       expect(ProblemDetails.parse(limited[0]!.body).code).toBe('RATE_LIMITED');
       expect(await countsFor(questionId)).toEqual({ stored: 1, rows: 1 });
     });
+
+    it('limits the board poll per attendee, so one busy device cannot lock out the room', async () => {
+      // Every request in this suite comes from 127.0.0.1, exactly like a hall
+      // full of phones behind one venue address. When the board was limited
+      // per IP, a room of ~100 polling every 10 seconds locked itself out.
+      const busy = await join(event.joinCode);
+      const neighbour = await join(event.joinCode);
+      const board = (token: string) =>
+        testApp
+          .http()
+          .get(`/api/v1/public/events/${event.joinCode}/questions`)
+          .set('Authorization', `Bearer ${token}`);
+
+      // The rule allows 60 a minute per attendee — ten times the poll rate.
+      for (let n = 0; n < 60; n += 1) {
+        expect((await board(busy)).status).toBe(200);
+      }
+      expect((await board(busy)).status).toBe(429);
+
+      // Same address, different attendee: unaffected.
+      expect((await board(neighbour)).status).toBe(200);
+    });
   });
 
   describe('concurrent voting', () => {

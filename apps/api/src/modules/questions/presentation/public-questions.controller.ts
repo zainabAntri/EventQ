@@ -44,6 +44,7 @@ import {
   type RateLimiter,
 } from '../../../shared/rate-limit/rate-limiter.port';
 import { RateLimitedError } from '../../../shared/errors/domain-error';
+import { clientIp, rateLimitSubject } from '../../../shared/http/client-ip';
 import { EventNotFoundError } from '../../events/domain/event.errors';
 import {
   ATTENDEE_TOKENS,
@@ -111,7 +112,7 @@ export class PublicQuestionsController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<AttendeeSessionResponse> {
     const code = parseJoinCode(joinCode);
-    await this.enforceLimit(RATE_LIMIT_RULES.attendeeJoin, clientIp(request));
+    await this.enforceLimit(RATE_LIMIT_RULES.attendeeJoin, this.ipSubject(request));
 
     // Read WITHOUT the guard: someone joining for the first time has no token,
     // and requiring one would make the first scan impossible. An existing token
@@ -148,7 +149,7 @@ export class PublicQuestionsController {
     // Per-IP, on top of the per-attendee allowance the event configures. One
     // limit alone is not enough: per-attendee is trivially bypassed by joining
     // again, and per-IP alone would throttle a whole conference sharing one NAT.
-    await this.enforceLimit(RATE_LIMIT_RULES.questionSubmitPerIp, clientIp(request));
+    await this.enforceLimit(RATE_LIMIT_RULES.questionSubmitPerIp, this.ipSubject(request));
 
     return this.submitQuestion.execute({
       joinCode: code,
@@ -174,10 +175,11 @@ export class PublicQuestionsController {
     @Param('joinCode') joinCode: string,
     @Query() query: QuestionListQueryDto,
     @AttendeeCtx() attendee: AttendeeTokenClaims,
-    @Req() request: Request,
   ): Promise<PublicQuestionListResponse> {
     const code = parseJoinCode(joinCode);
-    await this.enforceLimit(RATE_LIMIT_RULES.publicRead, clientIp(request));
+    // Per attendee, not per IP: a whole venue polls this from one address.
+    // See RATE_LIMIT_RULES.boardRead.
+    await this.enforceLimit(RATE_LIMIT_RULES.boardRead, attendee.sub);
 
     return this.listQuestions.execute({ joinCode: code, attendee, query });
   }
@@ -200,7 +202,7 @@ export class PublicQuestionsController {
     // Same read budget as the live board. There is no attendee identity to key
     // on here, so the client IP is the only subject available — which is why
     // the limit matters more, not less.
-    await this.enforceLimit(RATE_LIMIT_RULES.publicRead, clientIp(request));
+    await this.enforceLimit(RATE_LIMIT_RULES.publicRead, this.ipSubject(request));
 
     return this.listArchive.execute({ joinCode: code, query });
   }
@@ -225,7 +227,7 @@ export class PublicQuestionsController {
     const code = parseJoinCode(joinCode);
     // Loose per-IP layer; the per-attendee limit inside the use-case is the
     // precise one. See RATE_LIMIT_RULES for why the two numbers differ so much.
-    await this.enforceLimit(RATE_LIMIT_RULES.questionVotePerIp, clientIp(request));
+    await this.enforceLimit(RATE_LIMIT_RULES.questionVotePerIp, this.ipSubject(request));
 
     return this.vote.cast({ joinCode: code, questionId, attendee });
   }
@@ -248,7 +250,7 @@ export class PublicQuestionsController {
     @Req() request: Request,
   ): Promise<VoteResponse> {
     const code = parseJoinCode(joinCode);
-    await this.enforceLimit(RATE_LIMIT_RULES.questionVotePerIp, clientIp(request));
+    await this.enforceLimit(RATE_LIMIT_RULES.questionVotePerIp, this.ipSubject(request));
 
     return this.vote.withdraw({ joinCode: code, questionId, attendee });
   }
@@ -278,6 +280,12 @@ export class PublicQuestionsController {
       // An expired token and a first-ever scan must be indistinguishable.
       return null;
     }
+  }
+
+  /** The caller's rate-limit bucket. See shared/http/client-ip.ts for why the
+   *  forwarded address is believed only with the proxy secret. */
+  private ipSubject(request: Request): string {
+    return rateLimitSubject(clientIp(request, this.config.http.proxySharedSecret));
   }
 
   private async enforceLimit(rule: RateLimitRule, key: string): Promise<void> {
@@ -311,14 +319,6 @@ function normalizeIdempotencyKey(value: string | undefined): string | undefined 
   if (!trimmed || trimmed.length > 200) return undefined;
 
   return trimmed;
-}
-
-/**
- * Behind an ALB, `req.ip` is the load balancer unless `trust proxy` is set.
- * main.http.ts configures that; this reads the resolved value.
- */
-function clientIp(request: Request): string {
-  return request.ip ?? request.socket.remoteAddress ?? 'unknown';
 }
 
 /** Bearer is accepted for non-browser clients; browsers always use the cookie. */

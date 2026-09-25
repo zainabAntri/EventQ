@@ -45,6 +45,10 @@ const PLACEHOLDER_ENV: Readonly<Record<string, string>> = {
   JWT_ACCESS_SECRET: 'test-access-secret-that-is-long-enough-1234567890',
   ATTENDEE_TOKEN_SECRET: 'test-attendee-secret-that-is-different-0987654321',
 
+  // Configured so the suite can prove a forwarded client IP is believed WITH
+  // this secret and ignored without it (auth.integration.spec.ts).
+  API_PROXY_SHARED_SECRET: 'test-proxy-secret-that-is-long-enough-1357924680',
+
   S3_BUCKET: 'test-bucket',
   S3_ACCESS_KEY_ID: 'test-key',
   S3_SECRET_ACCESS_KEY: 'test-secret',
