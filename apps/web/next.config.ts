@@ -12,9 +12,10 @@ const securityHeaders = [
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   {
     key: 'Permissions-Policy',
-    // The attendee flow needs the camera for QR scanning on the device itself;
-    // everything else is denied outright.
-    value: 'camera=(self), microphone=(), geolocation=(), interest-cohort=()',
+    // The attendee flow needs the camera for QR scanning on the device itself,
+    // and the microphone for speaking a question (use-speech-input.ts). Both
+    // are for this site only; everything else is denied outright.
+    value: 'camera=(self), microphone=(self), geolocation=(), interest-cohort=()',
   },
 ];
 
