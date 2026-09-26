@@ -11,6 +11,7 @@ import { Alert, Button, FormField, Input, Label, Textarea } from '@/components/u
 import { ApiError } from '@/lib/api-client';
 import { submitQuestion } from '@/lib/api-client/public-events';
 import { useAttendeeSession } from './attendee-session';
+import { useSpeechInput } from './use-speech-input';
 
 /**
  * The whole attendee experience: one textarea, one optional name, one button.
@@ -58,6 +59,17 @@ export function AskForm({ joinCode }: { joinCode: string }) {
   const idempotencyKey = useRef<string>(crypto.randomUUID());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Spoken words are added after whatever is already typed, so an attendee
+  // can mix the two. Clipped to the same hard ceiling as the textarea.
+  const appendSpoken = useCallback((spoken: string) => {
+    setBody((current) => {
+      const joined = current.trim() ? `${current.trimEnd()} ${spoken}` : spoken;
+      return joined.slice(0, QUESTION_BODY_HARD_MAX);
+    });
+  }, []);
+  const speech = useSpeechInput({ onFinalText: appendSpoken });
+  const stopSpeech = speech.stop;
+
   const limits = session?.limits ?? FALLBACK_LIMITS;
   const identityMode = session?.identityMode ?? 'OPTIONAL';
   const length = countCharacters(body);
@@ -66,6 +78,7 @@ export function AskForm({ joinCode }: { joinCode: string }) {
   const handleSubmit = useCallback(
     async (submitEvent: React.FormEvent) => {
       submitEvent.preventDefault();
+      stopSpeech();
       setError(null);
       setFieldError(null);
 
@@ -108,7 +121,17 @@ export function AskForm({ joinCode }: { joinCode: string }) {
         setError(messageFor(caught));
       }
     },
-    [body, displayName, ensureSession, joinCode, length, limits, notifyQuestionSubmitted, session],
+    [
+      body,
+      displayName,
+      ensureSession,
+      joinCode,
+      length,
+      limits,
+      notifyQuestionSubmitted,
+      session,
+      stopSpeech,
+    ],
   );
 
   if (phase === 'submitted') {
@@ -149,6 +172,16 @@ export function AskForm({ joinCode }: { joinCode: string }) {
           required
         />
       </FormField>
+
+      {speech.supported ? (
+        <SpeechControl
+          listening={speech.listening}
+          interim={speech.interim}
+          error={speech.error}
+          onStart={speech.start}
+          onStop={speech.stop}
+        />
+      ) : null}
 
       {showName ? (
         <FormField hint={nameRequired ? undefined : 'Optional — leave blank to stay anonymous.'}>
@@ -192,6 +225,78 @@ export function AskForm({ joinCode }: { joinCode: string }) {
         Send question
       </Button>
     </form>
+  );
+}
+
+/**
+ * The mic button, what it is hearing, and where the audio goes.
+ *
+ * Rendered only where the browser can transcribe (see use-speech-input.ts).
+ * The status line is always in the DOM while this is shown, so the first
+ * update is announced; it carries the words being heard, or what went wrong.
+ */
+function SpeechControl({
+  listening,
+  interim,
+  error,
+  onStart,
+  onStop,
+}: {
+  listening: boolean;
+  interim: string;
+  error: string | null;
+  onStart: () => void;
+  onStop: () => void;
+}) {
+  const status = error ?? (listening ? interim || 'Listening…' : '');
+
+  return (
+    <div className="-mt-2 flex flex-col gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="lg"
+        fullWidth
+        aria-pressed={listening}
+        onClick={listening ? onStop : onStart}
+      >
+        <MicIcon />
+        {listening ? 'Stop listening' : 'Speak your question'}
+      </Button>
+
+      <p
+        role="status"
+        className={
+          error
+            ? 'text-sm font-medium text-red-600 empty:hidden'
+            : 'text-sm italic text-[var(--color-muted,#666)] empty:hidden'
+        }
+      >
+        {status}
+      </p>
+
+      <p className="text-xs text-[var(--color-muted,#666)]">
+        Your browser turns speech into text. In Chrome, the audio is sent to Google to do this.
+      </p>
+    </div>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="mr-2 size-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+    </svg>
   );
 }
 

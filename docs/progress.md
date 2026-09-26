@@ -18,9 +18,15 @@ changes, or when an open question closes.
 Read this section first. It is the handoff note for the next working session,
 so nobody has to reconstruct the state from git history.
 
-**Updated 2026-09-26. Phase 10 (SEO and performance) is in progress; Phase 9 Medium findings wait until after it.**
+**Updated 2026-09-26. Speech input is built; Phase 10 (SEO and performance) is in progress; Phase 9 Medium findings wait until after it.**
 
-- **Phase 10, part 1 — `feat/seo` (pushed, PR to open):** every route except
+- **Speech input — `feat/speech-input` (pushed, PR to open):** a "Speak your
+  question" button on the attendee form, shown only where the browser has the
+  Web Speech API (not Firefox). Language is the phone's own; spoken text is
+  appended to the box and validated exactly like typed text. No API change,
+  $0. Permissions-Policy now allows `microphone=(self)`. Still needs a check
+  on a real Android phone (Chrome) and iPhone (Safari, Dictation on).
+- **Phase 10, part 1 — `feat/seo` (merged as PR #21, verified live):** every route except
   `/` is noindex by header and by the root layout's default; robots.txt no
   longer disallows `/e/` (a disallowed page's noindex is never seen); sitemap
   lists only `/`; favicon, Apple icon, a generic share card, complete Open
@@ -240,11 +246,6 @@ From the original plan, still outstanding:
   review is Phase 9 (§9).
   The non-functional targets in [`architecture.md`](architecture.md) §2 are
   design targets; none has been measured under load.
-
-Agreed but not started:
-
-- **Speech input for attendees** — browser Web Speech API, so it costs nothing
-  and does not touch the AI layer. Its own branch when it starts.
 
 ---
 

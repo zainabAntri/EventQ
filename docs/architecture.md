@@ -104,6 +104,8 @@ Authorization is enforced in **three** layers, because one missed decorator shou
 
 zod validation at every boundary with NFKC normalisation; user text rendered as text only; nonce-based CSP and HSTS; Redis sliding-window rate limits; secrets in Secrets Manager and Vercel env, validated at boot; per-event retention with automatic PII purge.
 
+The microphone is allowed for this site only (`Permissions-Policy: microphone=(self)`), for the attendee's optional "Speak your question" button. Transcription is the browser's own Web Speech API, so no audio reaches EventQ's servers; but Chrome sends it to Google to transcribe (Safari does it on the device), and the form says so beside the button.
+
 Attendee text reaching a model is treated as **untrusted data, never instruction**: delimited, schema-constrained via structured outputs, and never able to trigger a side effect. No AI output is ever auto-published.
 
 ## 13. AI
