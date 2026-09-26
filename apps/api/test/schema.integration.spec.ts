@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { startTestDatabase, type TestDatabase } from './database.harness';
 import { hashForComparison } from '../src/modules/questions/domain/question-text';
@@ -40,6 +42,70 @@ describe('database schema', () => {
       WHERE table_schema = 'public' AND table_name <> '_prisma_migrations'
     `;
     expect(Number(rows[0]?.count ?? 0)).toBe(19);
+  });
+
+  describe('closed to the Supabase Data API', () => {
+    /**
+     * Supabase serves every `public` table over PostgREST to anyone holding the
+     * project's anon key, which is public by design. These tests pin the
+     * 20260924100000_lock_public_schema migration's two layers.
+     */
+    it('enables row level security on every table — including any added later', async () => {
+      const rows = await db.prisma.$queryRaw<Array<{ relname: string; rls: boolean }>>`
+        SELECT relname, relrowsecurity AS rls FROM pg_class
+        WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'
+      `;
+
+      expect(rows.length).toBeGreaterThanOrEqual(19);
+      // A failure here names the table whose migration forgot
+      // `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`.
+      expect(rows.filter((row) => !row.rls).map((row) => row.relname)).toEqual([]);
+    });
+
+    it('returns no rows to an API role even when it holds a SELECT grant', async () => {
+      await seedMinimalEvent(db);
+      await createApiRoles(db);
+
+      const visible = await db.prisma.$transaction(async (tx) => {
+        // Simulates Supabase's default grant, then reads as that role.
+        await tx.$executeRawUnsafe('GRANT SELECT ON public.organizations TO anon');
+        await tx.$executeRawUnsafe('SET LOCAL ROLE anon');
+        const rows = await tx.$queryRawUnsafe<Array<{ count: bigint }>>(
+          'SELECT count(*)::bigint AS count FROM public.organizations',
+        );
+        return Number(rows[0]?.count ?? -1);
+      });
+
+      expect(visible).toBe(0);
+      // The owner — which is what Prisma connects as — is unaffected.
+      expect(await db.prisma.organization.count()).toBe(1);
+    });
+
+    it('revokes what Supabase grants by default when the migration runs where the roles exist', async () => {
+      await createApiRoles(db);
+      await db.prisma.$executeRawUnsafe(
+        'GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated',
+      );
+
+      // Re-run the real migration file: on Supabase these roles exist when it
+      // first runs, so its REVOKE branch must be exercised here or a mistake in
+      // it would surface only in production.
+      await db.prisma.$executeRawUnsafe(
+        readFileSync(
+          // cwd is apps/api under both turbo and a direct vitest run, as in
+          // database.harness.ts.
+          join(process.cwd(), 'prisma/migrations/20260924100000_lock_public_schema/migration.sql'),
+          'utf8',
+        ),
+      );
+
+      const rows = await db.prisma.$queryRaw<Array<{ granted: boolean }>>`
+        SELECT has_table_privilege('anon', 'public.users', 'SELECT')
+            OR has_table_privilege('authenticated', 'public.users', 'SELECT')
+            OR has_table_privilege('anon', 'public.questions', 'INSERT') AS granted
+      `;
+      expect(rows[0]?.granted).toBe(false);
+    });
   });
 
   it('makes double-voting structurally impossible', async () => {
@@ -95,6 +161,16 @@ describe('database schema', () => {
     expect(eventId).toBeTruthy();
   });
 });
+
+/** Supabase's PostgREST roles. Roles are cluster-wide, so create only once. */
+async function createApiRoles(db: TestDatabase): Promise<void> {
+  await db.prisma.$executeRawUnsafe(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
+    END $$;
+  `);
+}
 
 /** Minimal valid object graph: org -> event -> attendee -> question. */
 async function seedMinimalEvent(db: TestDatabase, joinCode = 'TESTCODE') {

@@ -83,6 +83,18 @@ export async function startTestApp(options: TestAppOptions = {}): Promise<TestAp
   });
   await app.init();
 
+  // Listen ONCE, here, on a random free port — do not leave it to supertest.
+  //
+  // Handed a server that is not listening, supertest calls `listen(0)` on it
+  // for the request and `close()` on it when that request ends. The server is
+  // shared, so under concurrent requests (the voting race tests fire ten at
+  // once) the first request to finish closed the server under the other nine;
+  // Node 19+ `close()` also drops idle keep-alive sockets, and one of them got
+  // ECONNRESET. Timing-dependent, so it failed the slower CI runners far more
+  // often than a laptop. A server that is already listening is one supertest
+  // neither starts nor closes; `stop()` closes it via `app.close()`.
+  await app.listen(0, '127.0.0.1');
+
   const redis = app.get(RedisService);
 
   return {

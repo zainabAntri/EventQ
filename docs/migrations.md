@@ -77,6 +77,22 @@ resets. `migrate dev` and `migrate reset` must never run against production;
 `DATABASE_URL` there points at RDS via Secrets Manager and is not present in any
 developer environment.
 
+## Every new table enables row level security
+
+Supabase serves every table in `public` over its REST API to anyone holding the
+project's anon key, which Supabase treats as public. EventQ never uses that API,
+so `20260924100000_lock_public_schema` enables RLS on every table with no
+policies and revokes the `anon` and `authenticated` roles. Prisma connects as
+the tables' owner, and RLS does not apply to an owner, so the app is unaffected.
+
+A migration that creates a table must add, by hand, after Prisma's generated SQL:
+
+```sql
+ALTER TABLE "new_table" ENABLE ROW LEVEL SECURITY;
+```
+
+`schema.integration.spec.ts` fails, naming the table, if you forget.
+
 ## Extensions
 
 `pgcrypto`, `pg_trgm` and `vector` are declared in the datasource block and

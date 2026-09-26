@@ -29,6 +29,7 @@ import {
   type RateLimiter,
 } from '../../../shared/rate-limit/rate-limiter.port';
 import { RateLimitedError, UnauthenticatedError } from '../../../shared/errors/domain-error';
+import { clientIp, rateLimitSubject } from '../../../shared/http/client-ip';
 import { RegisterOrganizerUseCase } from '../application/register-organizer.use-case';
 import { LoginOrganizerUseCase } from '../application/login-organizer.use-case';
 import {
@@ -78,7 +79,7 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSessionResponse> {
-    await this.enforceLimit(RATE_LIMIT_RULES.register, clientIp(request));
+    await this.enforceLimit(RATE_LIMIT_RULES.register, this.ipSubject(request));
 
     const organizer = await this.registerOrganizerUseCase.execute(body);
     await this.issueCookies(organizer, request, response);
@@ -101,12 +102,14 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSessionResponse> {
-    await this.enforceLimit(RATE_LIMIT_RULES.login, clientIp(request));
+    // Every attempt counts, successful ones included, and a success does NOT
+    // reset the bucket. It used to, and that let an attacker spray passwords
+    // without limit: nine guesses at other accounts, one login to their own,
+    // counter back to zero. Ten attempts per 15 minutes is plenty for someone
+    // who mistyped.
+    await this.enforceLimit(RATE_LIMIT_RULES.login, this.ipSubject(request));
 
     const organizer = await this.loginOrganizerUseCase.execute(body);
-
-    // A user who mistyped once then succeeded should not stay penalised.
-    await this.rateLimiter.reset(RATE_LIMIT_RULES.login, clientIp(request));
     await this.issueCookies(organizer, request, response);
 
     return { organizer };
@@ -125,14 +128,14 @@ export class AuthController {
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSessionResponse> {
-    await this.enforceLimit(RATE_LIMIT_RULES.refresh, clientIp(request));
+    await this.enforceLimit(RATE_LIMIT_RULES.refresh, this.ipSubject(request));
 
     const presented = readRefreshCookie(request);
     if (!presented) throw new UnauthenticatedError('No session to refresh.');
 
     const { tokens, organizer } = await this.refreshSession.execute(
       presented,
-      sessionContext(request),
+      this.sessionContext(request),
     );
     setSessionCookies(response, this.config, tokens);
 
@@ -169,8 +172,22 @@ export class AuthController {
     request: Request,
     response: Response,
   ): Promise<void> {
-    const tokens = await this.startSession.execute(organizer, sessionContext(request));
+    const tokens = await this.startSession.execute(organizer, this.sessionContext(request));
     setSessionCookies(response, this.config, tokens);
+  }
+
+  /** See shared/http/client-ip.ts for why the forwarded address is believed
+   *  only with the proxy secret. */
+  private clientIp(request: Request): string {
+    return clientIp(request, this.config.http.proxySharedSecret);
+  }
+
+  private ipSubject(request: Request): string {
+    return rateLimitSubject(this.clientIp(request));
+  }
+
+  private sessionContext(request: Request) {
+    return { userAgent: request.headers['user-agent'], ipAddress: this.clientIp(request) };
   }
 
   private async enforceLimit(rule: RateLimitRule, key: string): Promise<void> {
@@ -187,16 +204,4 @@ export class AuthController {
 function readRefreshCookie(request: Request): string | undefined {
   const cookies = request.cookies as Record<string, string | undefined> | undefined;
   return cookies?.[REFRESH_TOKEN_COOKIE];
-}
-
-function sessionContext(request: Request) {
-  return { userAgent: request.headers['user-agent'], ipAddress: clientIp(request) };
-}
-
-/**
- * Behind an ALB, `req.ip` is the load balancer unless `trust proxy` is set.
- * main.http.ts configures that; this reads the resolved value.
- */
-function clientIp(request: Request): string {
-  return request.ip ?? request.socket.remoteAddress ?? 'unknown';
 }

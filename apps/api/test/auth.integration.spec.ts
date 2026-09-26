@@ -470,5 +470,75 @@ describe('organizer authentication', () => {
       // doing the work protects nothing.
       expect(await testApp.db.prisma.user.count()).toBe(5);
     });
+
+    /**
+     * Behind the web tier's proxy every request arrives from the proxy's
+     * address. Before the fix that made the per-IP login limit one bucket for
+     * the whole platform: ten bad logins from anyone locked out everyone.
+     */
+    describe('behind the web proxy', () => {
+      const proxySecret = process.env['API_PROXY_SHARED_SECRET']!;
+
+      const failedLogin = (headers: Record<string, string>) =>
+        testApp
+          .http()
+          .post('/api/v1/auth/login')
+          .set(csrf)
+          .set(headers)
+          // An unknown email, so the per-ACCOUNT lockout never engages and
+          // only the per-IP rule is under test.
+          .send({ email: 'nobody@eventq.test', password: 'wrong-password-entirely' });
+
+      const viaProxy = (ip: string) => ({
+        'x-eventq-proxy-secret': proxySecret,
+        'x-eventq-client-ip': ip,
+      });
+
+      it('gives each client behind the proxy its own login bucket', async () => {
+        for (let n = 0; n < 10; n += 1) {
+          expect((await failedLogin(viaProxy('203.0.113.7'))).status).toBe(401);
+        }
+        expect((await failedLogin(viaProxy('203.0.113.7'))).status).toBe(429);
+
+        // A different visitor, through the same proxy, is unaffected.
+        expect((await failedLogin(viaProxy('198.51.100.20'))).status).toBe(401);
+      });
+
+      it('ignores a forwarded address that arrives without the proxy secret', async () => {
+        // A caller hitting the API directly tries to give every attempt a
+        // fresh address. Without the secret the header is ignored, so all of
+        // these land in the caller's own bucket.
+        for (let n = 0; n < 10; n += 1) {
+          const spoofed = { 'x-eventq-client-ip': `203.0.113.${n + 1}` };
+          expect((await failedLogin(spoofed)).status).toBe(401);
+        }
+
+        const spoofed = { 'x-eventq-client-ip': '203.0.113.99' };
+        expect((await failedLogin(spoofed)).status).toBe(429);
+
+        const wrongSecret = { ...viaProxy('203.0.113.100'), 'x-eventq-proxy-secret': 'guessed' };
+        expect((await failedLogin(wrongSecret)).status).toBe(429);
+      });
+
+      it('does not reset the bucket on a successful login — no unlimited password spraying', async () => {
+        const attacker = await registerOrganizer(testApp);
+
+        for (let n = 0; n < 9; n += 1) {
+          expect((await failedLogin(viaProxy('203.0.113.7'))).status).toBe(401);
+        }
+
+        // The attacker signs into their OWN account. This used to clear the
+        // counter, buying another nine guesses at other people's accounts.
+        await testApp
+          .http()
+          .post('/api/v1/auth/login')
+          .set(csrf)
+          .set(viaProxy('203.0.113.7'))
+          .send({ email: attacker.email, password: attacker.password })
+          .expect(200);
+
+        expect((await failedLogin(viaProxy('203.0.113.7'))).status).toBe(429);
+      });
+    });
   });
 });

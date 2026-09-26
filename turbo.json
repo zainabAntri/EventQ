@@ -13,7 +13,7 @@
       // prefix on purpose (it is server-only), so it must be declared or the
       // deployed site silently builds with no API rewrites — and a later change
       // to it replays the stale cached build.
-      "env": ["API_PROXY_TARGET"]
+      "env": ["API_PROXY_TARGET", "API_PROXY_SHARED_SECRET"]
     },
     "dev": {
       "cache": false,
