@@ -120,3 +120,6 @@ Then sign in at `https://event-q-web.vercel.app/sign-in`. DevTools → Applicati
   your laptop.
 - Supabase pauses idle free projects; Render's free Key Value is not persistent.
   Both are acceptable for a demo and unacceptable for production.
+- The free Supabase plan has no backups. A nightly encrypted backup with a
+  restore test runs from GitHub Actions; set it up and restore from it with
+  [backup-restore.md](backup-restore.md).
