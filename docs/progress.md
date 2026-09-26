@@ -8,7 +8,7 @@ returning after a break, and for anyone joining the repo. Design lives in
 [`development.md`](development.md). Neither of those records status, so this one
 does.
 
-**Last updated: 2026-09-24.** Update it when a PR merges, when the deployment
+**Last updated: 2026-09-26.** Update it when a PR merges, when the deployment
 changes, or when an open question closes.
 
 ---
@@ -18,7 +18,19 @@ changes, or when an open question closes.
 Read this section first. It is the handoff note for the next working session,
 so nobody has to reconstruct the state from git history.
 
-**Updated 2026-09-26. Phase 9 High fixes are merged and verified live; Medium findings are next.**
+**Updated 2026-09-26. Phase 10 (SEO and performance) is in progress; Phase 9 Medium findings wait until after it.**
+
+- **Phase 10, part 1 — `feat/seo` (pushed, PR to open):** every route except
+  `/` is noindex by header and by the root layout's default; robots.txt no
+  longer disallows `/e/` (a disallowed page's noindex is never seen); sitemap
+  lists only `/`; favicon, Apple icon, a generic share card, complete Open
+  Graph and X tags, and JSON-LD on the landing page. Pinned by
+  `apps/web/src/app/seo.spec.ts`. Decision recorded in architecture.md §17.
+- **Phase 10, part 2 — `perf/audit` (not started):** Lighthouse on the live
+  site first, then fix only what the numbers show, and record the rest.
+- **Before any real event:** M1–M3 from §9.2 must be done.
+
+Phase 9 state:
 
 - **Merged:** `fix/security-hardening` as PR #18. No Critical findings; all
   three High fixes (H1–H3) are on `main`, each with a test.
@@ -28,10 +40,9 @@ so nobody has to reconstruct the state from git history.
 - **Production login check passed (2026-09-26):** 11 bad logins from a phone
   on mobile data, then a correct login from a laptop, which was not
   rate limited. H1 is confirmed live, and production counts as ready.
-- **Open PR #15** (`fix/select-option-colors`): its CI fails on the old
-  `ECONNRESET` flake because the branch predates the #16 fix. Press
-  "Update branch" on GitHub, then merge when green.
-- **Next:** Medium findings from §9.2, one branch each. Suggested order: M1
+- **PR #15 merged (2026-09-26)** after `main` was merged into it, since the
+  repo shows no "Update branch" button.
+- **Next after Phase 10:** Medium findings from §9.2, one branch each. Suggested order: M1
   display-name moderation, M2 Redis outage takes attendee routes down, M3
   identity minting, M4 AI spend per organization (before AI is ever enabled).
 - **Local testing gotcha:** `sentinelhub-redis` (another project) holds port 6379. Run the integration suite against a throwaway Redis instead:

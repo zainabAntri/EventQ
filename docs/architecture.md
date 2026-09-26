@@ -164,7 +164,11 @@ No Vercel-proprietary API is used in application code, so the frontend stays por
 
 Marketing routes are SSG/ISR with JSON-LD and dynamic OG images; `/solutions/[vertical]` pages serve the multi-vertical go-to-market.
 
-**Application routes are `noindex` by default and enforced twice** (header + robots.txt). An indexed event page would expose attendee questions publicly — a privacy incident, not an SEO mistake. A public event page is indexable only when the organizer explicitly opts in.
+**Every route except the landing page is `noindex` by default, enforced twice:** an `X-Robots-Tag` header on every path but `/` (`next.config.ts`) and a `noindex` default in the root layout's metadata, which the landing page alone overrides. A new route is therefore private until someone decides otherwise. An indexed event page would expose attendee questions publicly — a privacy incident, not an SEO mistake.
+
+robots.txt deliberately does **not** disallow these pages. A crawler barred from a URL never fetches it, so it never sees the `noindex`, and it can still list the bare URL when a join link is shared publicly. Only `/api/` and `/health/` are disallowed.
+
+No event page is indexable today. The organizer opt-in (`Event.isPubliclyListed`) has no UI, so no event is in the sitemap either. The share card is one generic EventQ image on every route, so a forwarded join link never previews a private event's title.
 
 ## 18. Observability
 

@@ -64,10 +64,13 @@ const nextConfig: NextConfig = {
         headers: securityHeaders,
       },
       {
-        // The application surfaces must never be indexed. An indexed event page
-        // would expose attendee questions to search engines, which is a privacy
-        // incident rather than an SEO problem.
-        source: '/:path(e|app|present)/:rest*',
+        // Every path except the landing page is noindex, including routes that
+        // do not exist yet. An indexed event page would expose attendee
+        // questions to search engines, which is a privacy incident rather than
+        // an SEO problem, so a new route is private until someone decides
+        // otherwise. A new marketing page must be excluded here on purpose.
+        // `/:path+` needs at least one segment, so it never matches `/`.
+        source: '/:path+',
         headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
       },
     ];

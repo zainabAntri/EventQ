@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import { env } from '@/lib/env';
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE } from '@/lib/site';
 import './globals.css';
 
 // Self-hosted by next/font: no render-blocking request to a third party, no
@@ -11,21 +12,40 @@ const inter = Inter({
   variable: '--font-inter',
 });
 
+/**
+ * Defaults for every page. The favicon, Apple touch icon and share image come
+ * from the icon.svg, apple-icon.tsx and opengraph-image.tsx files next to this
+ * one.
+ *
+ * `robots` defaults to noindex, so a page nobody thought about stays private.
+ * Only the landing page opts in. This matches the X-Robots-Tag header in
+ * next.config.ts.
+ *
+ * The share card is the same generic EventQ card on every page. An event link
+ * posted in a group chat must not preview the event's title or description,
+ * because a private event's details would then travel with the link.
+ */
 export const metadata: Metadata = {
   metadataBase: new URL(env.NEXT_PUBLIC_SITE_URL),
+  applicationName: SITE_NAME,
   title: {
-    default: 'EventQ - Audience Q&A for live events',
-    template: '%s | EventQ',
+    default: SITE_TITLE,
+    template: `%s | ${SITE_NAME}`,
   },
-  description:
-    'Collect, moderate and rank audience questions in real time. Attendees scan a QR code and ask - no app, no account.',
+  description: SITE_DESCRIPTION,
   openGraph: {
     type: 'website',
-    siteName: 'EventQ',
-    url: env.NEXT_PUBLIC_SITE_URL,
+    siteName: SITE_NAME,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    locale: 'en_US',
   },
-  twitter: { card: 'summary_large_image' },
-  robots: { index: true, follow: true },
+  twitter: {
+    card: 'summary_large_image',
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
+  robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {
