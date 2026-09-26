@@ -117,10 +117,13 @@ jobs:
             -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS vector;'
           # The dump contains `CREATE SCHEMA public`, which every database
           # already has, so that one entry is left out of the restore list.
-          docker run --rm --network host -v /tmp:/tmp "$PG_IMAGE" sh -c '
-            pg_restore --list /tmp/restore.dump | grep -v " SCHEMA - public " > /tmp/restore.list &&
+          # The list lives inside the container, not in the mounted /tmp: the
+          # container runs as root, and a root-owned file left on the runner
+          # cannot be removed by the runner's user afterwards.
+          docker run --rm --network host -v /tmp/restore.dump:/in/restore.dump:ro "$PG_IMAGE" sh -c '
+            pg_restore --list /in/restore.dump | grep -v " SCHEMA - public " > /restore.list &&
             pg_restore --dbname="$0" --no-owner --no-acl --exit-on-error \
-              --use-list=/tmp/restore.list /tmp/restore.dump' "$RESTORE_URL"
+              --use-list=/restore.list /in/restore.dump' "$RESTORE_URL"
           docker run --rm --network host "$PG_IMAGE" \
             psql "$RESTORE_URL" -At -F ' ' -c "
               SELECT 'server_version', current_setting('server_version_num')
@@ -130,7 +133,7 @@ jobs:
               UNION ALL SELECT 'users', count(*)::text FROM public.users
               UNION ALL SELECT 'events', count(*)::text FROM public.events
               UNION ALL SELECT 'questions', count(*)::text FROM public.questions" | tee restored-counts.txt
-          rm -f /tmp/restore.dump /tmp/restore.list
+          rm -f /tmp/restore.dump
 
       - name: Compare source and restore
         # Tables and migrations must match exactly. Row counts can differ by a
