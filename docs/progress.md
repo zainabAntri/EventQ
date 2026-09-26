@@ -18,22 +18,38 @@ changes, or when an open question closes.
 Read this section first. It is the handoff note for the next working session,
 so nobody has to reconstruct the state from git history.
 
-**Updated 2026-09-26. Speech input is built; Phase 10 (SEO and performance) is in progress; Phase 9 Medium findings wait until after it.**
+**Updated 2026-09-26. A production-readiness audit ran: 68/100, not production-ready. Fixing its two High issues first.**
 
-- **Speech input — `feat/speech-input` (pushed, PR to open):** a "Speak your
-  question" button on the attendee form, shown only where the browser has the
-  Web Speech API (not Firefox). Language is the phone's own; spoken text is
-  appended to the box and validated exactly like typed text. No API change,
-  $0. Permissions-Policy now allows `microphone=(self)`. Still needs a check
-  on a real Android phone (Chrome) and iPhone (Safari, Dictation on).
+- **Readiness audit (2026-09-26):** 0 Critical, 2 High, 21 Medium, 27 Low. 17/17
+  user journeys passed on the local stack; 550/550 unit and integration tests;
+  37/41 browser E2E. The full report with evidence lives in the audit artifact
+  (ask the author for the link). Agreed fix order:
+  1. **H-1 no database backup** — `ops/db-backup` (pushed, PR to open): nightly
+     encrypted `pg_dump` with a restore test, [backup-restore.md](backup-restore.md).
+     **Needs two GitHub secrets set by the author**, then one manual run.
+  2. **H-2 Render cold start at scan time** — pre-event warm-up or uptime ping.
+  3. Quality branch: undefined `--color-muted` (contrast), `<ul role="tabpanel">`
+     in moderation-console.tsx, E2E fixes and E2E in CI (smoke.spec.ts:77 still
+     expects `Disallow: /e/`), insights double-counting merged votes, 500s for
+     oversized bodies and bad board cursors.
+  4. Before a large event: per-IP submit limit (48 of 150 rejected in a burst
+     from one address) and its misleading message; §9.2 M1–M3.
+  5. Attendee page LCP 3.2 s (board rendered client-side); docs drift.
+- **Speech input — merged (PR #22, fix PR #23):** a "Speak your question"
+  button, shown only where the browser has the Web Speech API. Real-phone check
+  found a stuck button after a mic error, fixed in #23. Still needs a
+  successful dictation on Android Chrome and iPhone Safari.
 - **Phase 10, part 1 — `feat/seo` (merged as PR #21, verified live):** every route except
   `/` is noindex by header and by the root layout's default; robots.txt no
   longer disallows `/e/` (a disallowed page's noindex is never seen); sitemap
   lists only `/`; favicon, Apple icon, a generic share card, complete Open
   Graph and X tags, and JSON-LD on the landing page. Pinned by
   `apps/web/src/app/seo.spec.ts`. Decision recorded in architecture.md §17.
-- **Phase 10, part 2 — `perf/audit` (not started):** Lighthouse on the live
-  site first, then fix only what the numbers show, and record the rest.
+- **Phase 10, part 2 — performance:** folded into the readiness audit. Live
+  home and sign-in score 99 on Lighthouse mobile (LCP 1.7 s / 1.3 s); the
+  attendee page misses its LCP target (item 5 above).
+- **Phase 11 (AWS production design):** brief received, not started. AWS costs
+  money every month; decide design-only versus provisioning first.
 - **Before any real event:** M1–M3 from §9.2 must be done.
 
 Phase 9 state:

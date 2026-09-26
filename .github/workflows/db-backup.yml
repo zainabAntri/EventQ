@@ -1,0 +1,162 @@
+name: Database backup
+
+# Nightly logical backup of the production database, encrypted, stored as a
+# workflow artifact, and PROVEN restorable in the same run.
+#
+# Why this exists: the Supabase free plan has no project backups and no
+# point-in-time recovery, so without this job a bad migration or an
+# accidental delete is permanent. See docs/backup-restore.md for the restore
+# runbook, RPO/RTO and failure scenarios.
+#
+# The repo is public, and public-repo artifacts can be downloaded by any
+# signed-in GitHub user. So the dump is encrypted before it is uploaded and
+# the plaintext never leaves the runner.
+#
+# Secrets (Settings â†’ Secrets and variables â†’ Actions):
+#   SUPABASE_DB_URL     session pooler URL (port 5432), with the password.
+#                       Runners have no IPv6, so the direct host will not work.
+#   BACKUP_PASSPHRASE   long random passphrase. Keep a copy in a password
+#                       manager: without it no backup can ever be opened.
+
+on:
+  schedule:
+    # 02:00 UTC daily. Scheduled runs use the default branch only, and GitHub
+    # disables schedules in a public repo after 60 days without activity.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never two backups at once.
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+env:
+  # pg_dump must be at least as new as the server. 17 can dump any older
+  # server, and its restore is tested below with the same major version.
+  PG_IMAGE: postgres:17
+
+jobs:
+  backup:
+    name: Dump, encrypt, verify restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      # Scratch database for the restore test. Thrown away with the runner.
+      restore:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: restore
+          POSTGRES_PASSWORD: restore
+          POSTGRES_DB: restore
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd "pg_isready -U restore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      RESTORE_URL: postgresql://restore:restore@localhost:5433/restore
+    steps:
+      - name: Check secrets are set
+        run: |
+          missing=0
+          [ -n "$SUPABASE_DB_URL" ] || { echo "::error::SUPABASE_DB_URL secret is not set"; missing=1; }
+          [ -n "$BACKUP_PASSPHRASE" ] || { echo "::error::BACKUP_PASSPHRASE secret is not set"; missing=1; }
+          exit $missing
+
+      - name: Name the backup
+        id: name
+        run: echo "file=eventq-$(date -u +%Y%m%dT%H%MZ).dump" >> "$GITHUB_OUTPUT"
+
+      - name: Dump
+        # Custom format: compressed, and pg_restore can restore it selectively.
+        # Only the `public` schema: that is all of EventQ. Supabase's own
+        # schemas (auth, storage, ...) are unused and belong to the platform.
+        # No owners or grants, so the dump restores into any database; the
+        # extensions it needs are created before restoring (see below).
+        run: |
+          mkdir -p backup
+          docker run --rm --network host -v "$PWD/backup:/backup" "$PG_IMAGE" \
+            pg_dump "$SUPABASE_DB_URL" --format=custom --schema=public --no-owner --no-acl \
+              --file="/backup/${{ steps.name.outputs.file }}"
+          ls -l backup
+
+      - name: Record source row counts
+        run: |
+          docker run --rm --network host -e SUPABASE_DB_URL "$PG_IMAGE" \
+            psql "$SUPABASE_DB_URL" -At -F ' ' -c "
+              SELECT 'server_version', current_setting('server_version_num')
+              UNION ALL SELECT 'tables', count(*)::text FROM pg_tables WHERE schemaname = 'public'
+              UNION ALL SELECT 'migrations', count(*)::text FROM public._prisma_migrations
+              UNION ALL SELECT 'organizations', count(*)::text FROM public.organizations
+              UNION ALL SELECT 'users', count(*)::text FROM public.users
+              UNION ALL SELECT 'events', count(*)::text FROM public.events
+              UNION ALL SELECT 'questions', count(*)::text FROM public.questions" | tee source-counts.txt
+
+      - name: Encrypt, then drop the plaintext
+        run: |
+          f="backup/${{ steps.name.outputs.file }}"
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 --symmetric --cipher-algo AES256 --output "$f.gpg" "$f"
+          rm -f "$f"
+          ls -l backup
+
+      - name: Restore test from the ENCRYPTED file
+        # Decrypting what was uploaded, not the plaintext, proves the
+        # passphrase and the file both work.
+        run: |
+          f="backup/${{ steps.name.outputs.file }}"
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 --decrypt --output /tmp/restore.dump "$f.gpg"
+          docker run --rm --network host "$PG_IMAGE" psql "$RESTORE_URL" -v ON_ERROR_STOP=1 \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm; CREATE EXTENSION IF NOT EXISTS vector;'
+          # The dump contains `CREATE SCHEMA public`, which every database
+          # already has, so that one entry is left out of the restore list.
+          docker run --rm --network host -v /tmp:/tmp "$PG_IMAGE" sh -c '
+            pg_restore --list /tmp/restore.dump | grep -v " SCHEMA - public " > /tmp/restore.list &&
+            pg_restore --dbname="$0" --no-owner --no-acl --exit-on-error \
+              --use-list=/tmp/restore.list /tmp/restore.dump' "$RESTORE_URL"
+          docker run --rm --network host "$PG_IMAGE" \
+            psql "$RESTORE_URL" -At -F ' ' -c "
+              SELECT 'server_version', current_setting('server_version_num')
+              UNION ALL SELECT 'tables', count(*)::text FROM pg_tables WHERE schemaname = 'public'
+              UNION ALL SELECT 'migrations', count(*)::text FROM public._prisma_migrations
+              UNION ALL SELECT 'organizations', count(*)::text FROM public.organizations
+              UNION ALL SELECT 'users', count(*)::text FROM public.users
+              UNION ALL SELECT 'events', count(*)::text FROM public.events
+              UNION ALL SELECT 'questions', count(*)::text FROM public.questions" | tee restored-counts.txt
+          rm -f /tmp/restore.dump /tmp/restore.list
+
+      - name: Compare source and restore
+        # Tables and migrations must match exactly. Row counts can differ by a
+        # write that landed between the dump and the count, so they are
+        # reported, not enforced.
+        run: |
+          for key in tables migrations; do
+            src=$(awk -v k="$key" '$1==k{print $2}' source-counts.txt)
+            dst=$(awk -v k="$key" '$1==k{print $2}' restored-counts.txt)
+            echo "$key: source=$src restored=$dst"
+            [ "$src" = "$dst" ] || { echo "::error::$key differ after restore"; exit 1; }
+          done
+          {
+            echo "### Backup ${{ steps.name.outputs.file }}.gpg"
+            echo
+            echo "| | source | restored |"
+            echo "|---|---|---|"
+            paste -d ' ' source-counts.txt restored-counts.txt | awk '{print "| "$1" | "$2" | "$4" |"}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload encrypted backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.file }}.gpg
+          path: backup/${{ steps.name.outputs.file }}.gpg
+          retention-days: 30
+          if-no-files-found: error
+          # Already compressed by pg_dump and encrypted; zipping again gains nothing.
+          compression-level: 0

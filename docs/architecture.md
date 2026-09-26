@@ -178,7 +178,9 @@ pino JSON logs with a correlation id propagated into background jobs; PII redact
 
 ## 19. Backup and recovery
 
-RDS PITR (30 days in production) with cross-region snapshot copies, plus an independent nightly logical dump. **A monthly restore drill with measured RTO/RPO** — an untested backup is not a backup. Redis is expendable; in-flight work is recoverable from the outbox table.
+**What runs today** (free tier, Supabase has no backups): a nightly `pg_dump` from GitHub Actions, encrypted and kept 30 days, restored into a scratch database in the same job to prove it works. RPO 24 h. See [backup-restore.md](backup-restore.md).
+
+**Target design on AWS:** RDS PITR (30 days in production) with cross-region snapshot copies, plus an independent nightly logical dump. **A monthly restore drill with measured RTO/RPO** — an untested backup is not a backup. Redis is expendable; in-flight work is recoverable from the outbox table.
 
 ## 20. Scalability
 
