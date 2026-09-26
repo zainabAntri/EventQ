@@ -125,14 +125,23 @@ export function useSpeechInput({ onFinalText }: { onFinalText: (text: string) =>
       setInterim(pending);
       if (finalText.trim()) onFinalTextRef.current(finalText.trim());
     };
-    recognition.onerror = (event) => {
-      setError(messageForError(event.error));
-    };
-    recognition.onend = () => {
+    // Resets the button. Guarded, so a late event from an old recognizer cannot
+    // reset a new one the attendee has just started.
+    const finish = () => {
+      if (recognitionRef.current !== recognition) return;
       recognitionRef.current = null;
       setListening(false);
       setInterim('');
     };
+    recognition.onerror = (event) => {
+      setError(messageForError(event.error));
+      // Some browsers (seen on Android Chrome with the microphone blocked)
+      // never send `end` after an error, which left the button stuck on
+      // "Stop listening". An error always ends the attempt, so finish here.
+      recognition.abort();
+      finish();
+    };
+    recognition.onend = finish;
 
     recognitionRef.current = recognition;
     setError(null);
