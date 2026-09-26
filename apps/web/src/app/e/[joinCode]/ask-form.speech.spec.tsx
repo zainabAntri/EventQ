@@ -173,6 +173,40 @@ describe('speech input', () => {
       expect(screen.getByLabelText(/your question/i)).toHaveValue('Typed instead');
     });
 
+    it('resets the button after an error even when the browser never sends end', async () => {
+      // Seen on Android Chrome with the microphone blocked: `error` arrives,
+      // `end` does not, and the button stayed on "Stop listening".
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.click(await screen.findByRole('button', { name: /speak your question/i }));
+      act(() => recognizer().onerror?.({ error: 'not-allowed' }));
+
+      expect(screen.getByRole('button', { name: /speak your question/i })).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+      expect(screen.getByRole('status')).toHaveTextContent(/microphone is blocked/i);
+    });
+
+    it('lets the attendee try again after an error', async () => {
+      const user = userEvent.setup();
+      renderForm();
+
+      await user.click(await screen.findByRole('button', { name: /speak your question/i }));
+      const first = recognizer();
+      act(() => first.onerror?.({ error: 'no-speech' }));
+
+      await user.click(screen.getByRole('button', { name: /speak your question/i }));
+      const second = recognizer();
+      // A late `end` from the first attempt must not reset the second one.
+      first.finish();
+
+      expect(second).not.toBe(first);
+      expect(second.start).toHaveBeenCalledOnce();
+      expect(screen.getByRole('button', { name: /stop listening/i })).toBeInTheDocument();
+    });
+
     it('never lets speech push the text past the hard limit', async () => {
       const user = userEvent.setup();
       renderForm();
